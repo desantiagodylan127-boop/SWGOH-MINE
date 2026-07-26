@@ -15,11 +15,12 @@ The offline bootstrap's existing `libofflinecore.so` uses these ShadowHook APIs:
 - `shadowhook_dlopen` / `shadowhook_dlsym`
 - `shadowhook_get_errno` / `shadowhook_to_errmsg`
 
-On the affected Samsung device, ShadowHook fails before any game hook is
-installed with `Init linker mod failed`. This library keeps that ABI but:
+On the affected Samsung device, stock ShadowHook fails before any game hook is
+installed with `Init linker mod failed`. This build keeps ShadowHook's tested
+function-hook engine but:
 
-- uses Dobby for the four ARM64 inline hooks;
-- avoids modifying both linker internals and the public `libdl` trampolines;
+- skips ShadowHook's incompatible linker-monitor and queued-symbol modules;
+- avoids modifying both linker internals and public `libdl` trampolines;
 - detects `libil2cpp.so` with `dl_iterate_phdr` from a lightweight worker; and
 - reports failure to `libofflinecore.so` if any target hook cannot be installed.
 
@@ -33,7 +34,7 @@ Requirements:
 - CMake 3.22+
 - Ninja
 - Android NDK r29 (`29.0.14206865`) or newer
-- Git access for the pinned Dobby source
+- Git access for the pinned ShadowHook source
 
 ```bash
 export ANDROID_NDK_HOME=/path/to/android-ndk-r29
@@ -46,13 +47,12 @@ This produces:
 dist/jni/arm64-v8a/libshadowhook.so
 ```
 
-Dobby is pinned to commit
-`a418c6a7c493e6c599713a097ff823c84a40ba96`, which includes the Android ARM64
-and short-trampoline fixes proposed upstream in `jmpews/Dobby#302`.
+ShadowHook is pinned to commit
+`47302d5bd8e508d589d2f3dfd7536ece06c610a1` (version 2.0.1 source).
 
-The APK's original ARMv7 ShadowHook library is deliberately retained. Dobby's
-current ARMv7 source does not compile with NDK r29, while the reported linker
-failure is in the ARM64 process selected by the target Samsung phone.
+The APK's original ARMv7 ShadowHook library is deliberately retained because
+the reported linker failure is in the ARM64 process selected by the target
+Samsung phone.
 
 ## Patch a locally supplied offline6 APK
 
