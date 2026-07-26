@@ -25,9 +25,6 @@ enum ErrorCode {
 };
 
 using DlCallback = void (*)(dl_phdr_info* info, std::size_t size, void* data);
-using AndroidDlopenExt = void* (*)(const char* filename, int flags, const void* extinfo);
-using Dlopen = void* (*)(const char* filename, int flags);
-
 struct CallbackRegistration {
   DlCallback pre;
   DlCallback post;
@@ -43,10 +40,6 @@ std::atomic<bool> g_initialized{false};
 std::atomic<bool> g_target_notified{false};
 std::atomic<bool> g_worker_started{false};
 thread_local int g_last_error = kOk;
-thread_local bool g_inside_loader_proxy = false;
-
-AndroidDlopenExt g_original_android_dlopen_ext = nullptr;
-Dlopen g_original_dlopen = nullptr;
 
 bool is_target_library(const char* path) {
   if (path == nullptr) {
@@ -73,7 +66,6 @@ void notify_callbacks(dl_phdr_info* info, std::size_t size) {
     return;
   }
 
-  g_inside_loader_proxy = true;
   for (std::size_t i = 0; i < callback_count; ++i) {
     if (callbacks[i].pre != nullptr) {
       callbacks[i].pre(info, size, callbacks[i].data);
@@ -82,7 +74,6 @@ void notify_callbacks(dl_phdr_info* info, std::size_t size) {
       callbacks[i].post(info, size, callbacks[i].data);
     }
   }
-  g_inside_loader_proxy = false;
 }
 
 int find_and_notify_target(dl_phdr_info* info, std::size_t size, void*) {
@@ -100,8 +91,7 @@ void scan_loaded_libraries() {
 }
 
 void* callback_worker(void*) {
-  // Loader interception is the primary path. Polling is a bounded-cost fallback
-  // for Android builds that bypass public libdl entry points.
+  // Observe library loading without modifying modern Android linker/libdl code.
   for (unsigned int attempts = 0; !g_target_notified.load(); ++attempts) {
     scan_loaded_libraries();
     usleep(attempts < 30000 ? 1000 : 100000);
@@ -123,56 +113,15 @@ void start_callback_worker() {
   }
 }
 
-void scan_after_load(void* handle) {
-  if (handle != nullptr && !g_inside_loader_proxy) {
-    g_inside_loader_proxy = true;
-    scan_loaded_libraries();
-    g_inside_loader_proxy = false;
-  }
-}
-
-void* android_dlopen_ext_proxy(const char* filename, int flags, const void* extinfo) {
-  void* handle = g_original_android_dlopen_ext(filename, flags, extinfo);
-  scan_after_load(handle);
-  return handle;
-}
-
-void* dlopen_proxy(const char* filename, int flags) {
-  void* handle = g_original_dlopen(filename, flags);
-  scan_after_load(handle);
-  return handle;
-}
-
-bool install_loader_monitors() {
-  void* android_dlopen_ext_address = dlsym(RTLD_DEFAULT, "android_dlopen_ext");
-  void* dlopen_address = dlsym(RTLD_DEFAULT, "dlopen");
-
-  if (android_dlopen_ext_address != nullptr &&
-      DobbyHook(android_dlopen_ext_address, reinterpret_cast<void*>(android_dlopen_ext_proxy),
-                reinterpret_cast<void**>(&g_original_android_dlopen_ext)) != 0) {
-    g_original_android_dlopen_ext = nullptr;
-  }
-
-  if (dlopen_address != nullptr &&
-      DobbyHook(dlopen_address, reinterpret_cast<void*>(dlopen_proxy),
-                reinterpret_cast<void**>(&g_original_dlopen)) != 0) {
-    g_original_dlopen = nullptr;
-  }
-
-  if (g_original_android_dlopen_ext == nullptr) {
-    __android_log_print(ANDROID_LOG_ERROR, kLogTag,
-                        "android_dlopen_ext hook failed; refusing to arm offline bridge");
-    return false;
-  }
-  return true;
-}
-
 }  // namespace
 
 extern "C" __attribute__((visibility("default"))) int shadowhook_init(int, bool) {
   bool expected = false;
   if (g_initialized.compare_exchange_strong(expected, true)) {
-    g_init_result.store(install_loader_monitors() ? kOk : kHookFailed);
+    // Do not inline-hook libdl/linker entry points. Several modern Samsung
+    // builds expose one-instruction trampolines that are unsafe relocation
+    // targets. The registered callback worker observes libil2cpp instead.
+    g_init_result.store(kOk);
   }
   g_last_error = g_init_result.load();
   return g_last_error;

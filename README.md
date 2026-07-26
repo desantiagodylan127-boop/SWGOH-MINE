@@ -19,11 +19,8 @@ On the affected Samsung device, ShadowHook fails before any game hook is
 installed with `Init linker mod failed`. This library keeps that ABI but:
 
 - uses Dobby for the four ARM64 inline hooks;
-- monitors public `libdl` entry points instead of modifying linker internals;
-- requires interception of `android_dlopen_ext` before reporting successful
-  initialization;
-- uses `dl_iterate_phdr` polling only as a secondary loader-detection safeguard;
-  and
+- avoids modifying both linker internals and the public `libdl` trampolines;
+- detects `libil2cpp.so` with `dl_iterate_phdr` from a lightweight worker; and
 - reports failure to `libofflinecore.so` if any target hook cannot be installed.
 
 The original offline core remains responsible for its pinned RVAs, request
