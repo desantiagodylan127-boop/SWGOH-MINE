@@ -12,7 +12,6 @@ import zipfile
 
 REPLACEMENTS = {
     "lib/arm64-v8a/libshadowhook.so": "arm64-v8a",
-    "lib/armeabi-v7a/libshadowhook.so": "armeabi-v7a",
 }
 
 

@@ -9,7 +9,7 @@ if [[ -z "${ndk}" || ! -f "${ndk}/build/cmake/android.toolchain.cmake" ]]; then
   exit 1
 fi
 
-for abi in arm64-v8a armeabi-v7a; do
+for abi in arm64-v8a; do
   build_dir="${repo_root}/build/${abi}"
   cmake \
     -S "${repo_root}" \
@@ -24,6 +24,8 @@ for abi in arm64-v8a armeabi-v7a; do
 
   mkdir -p "${repo_root}/dist/jni/${abi}"
   cp "${build_dir}/libshadowhook.so" "${repo_root}/dist/jni/${abi}/libshadowhook.so"
+  "${ndk}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
+    "${repo_root}/dist/jni/${abi}/libshadowhook.so"
 done
 
 echo "Built compatibility libraries under dist/jni/"

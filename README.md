@@ -1,6 +1,6 @@
 # Heroes Offline hook compatibility
 
-This repository contains the source-only native compatibility layer used to
+This repository contains the source-only ARM64 compatibility layer used to
 replace ShadowHook in the `HeroesOffline-offline6-universal.apk` bootstrap.
 No Electronic Arts game binaries, assets, signing keys, or APKs are stored in
 the repository.
@@ -18,10 +18,12 @@ The offline bootstrap's existing `libofflinecore.so` uses these ShadowHook APIs:
 On the affected Samsung device, ShadowHook fails before any game hook is
 installed with `Init linker mod failed`. This library keeps that ABI but:
 
-- uses Dobby for the four ARM/ARM64 inline hooks;
+- uses Dobby for the four ARM64 inline hooks;
 - monitors public `libdl` entry points instead of modifying linker internals;
-- falls back to `dl_iterate_phdr` polling if a device bypasses those entry
-  points; and
+- requires interception of `android_dlopen_ext` before reporting successful
+  initialization;
+- uses `dl_iterate_phdr` polling only as a secondary loader-detection safeguard;
+  and
 - reports failure to `libofflinecore.so` if any target hook cannot be installed.
 
 The original offline core remains responsible for its pinned RVAs, request
@@ -45,30 +47,33 @@ This produces:
 
 ```text
 dist/jni/arm64-v8a/libshadowhook.so
-dist/jni/armeabi-v7a/libshadowhook.so
 ```
 
 Dobby is pinned to commit
 `a418c6a7c493e6c599713a097ff823c84a40ba96`, which includes the Android ARM64
 and short-trampoline fixes proposed upstream in `jmpews/Dobby#302`.
 
+The APK's original ARMv7 ShadowHook library is deliberately retained. Dobby's
+current ARMv7 source does not compile with NDK r29, while the reported linker
+failure is in the ARM64 process selected by the target Samsung phone.
+
 ## Patch a locally supplied offline6 APK
 
 ```bash
 ./scripts/patch-apk.py \
   /path/to/HeroesOffline-offline6-universal.apk \
-  build/HeroesOffline-offline7-unsigned-unaligned.apk
+  build/HeroesOffline-offline6-dobby-unsigned-unaligned.apk
 
 zipalign -P 16 -f 4 \
-  build/HeroesOffline-offline7-unsigned-unaligned.apk \
-  build/HeroesOffline-offline7-unsigned.apk
+  build/HeroesOffline-offline6-dobby-unsigned-unaligned.apk \
+  build/HeroesOffline-offline6-dobby-unsigned.apk
 
 apksigner sign --ks /path/to/heroes-offline.jks \
-  --out build/HeroesOffline-offline7-universal.apk \
-  build/HeroesOffline-offline7-unsigned.apk
+  --out build/HeroesOffline-offline6-dobby-universal.apk \
+  build/HeroesOffline-offline6-dobby-unsigned.apk
 
 apksigner verify --verbose --print-certs \
-  build/HeroesOffline-offline7-universal.apk
+  build/HeroesOffline-offline6-dobby-universal.apk
 ```
 
 Use the same signing key as `offline6` to install as an update. If that private

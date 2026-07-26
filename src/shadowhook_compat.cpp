@@ -143,7 +143,7 @@ void* dlopen_proxy(const char* filename, int flags) {
   return handle;
 }
 
-void install_loader_monitors() {
+bool install_loader_monitors() {
   void* android_dlopen_ext_address = dlsym(RTLD_DEFAULT, "android_dlopen_ext");
   void* dlopen_address = dlsym(RTLD_DEFAULT, "dlopen");
 
@@ -159,10 +159,12 @@ void install_loader_monitors() {
     g_original_dlopen = nullptr;
   }
 
-  if (g_original_android_dlopen_ext == nullptr && g_original_dlopen == nullptr) {
-    __android_log_print(ANDROID_LOG_WARN, kLogTag,
-                        "Public loader hooks unavailable; using phdr polling fallback");
+  if (g_original_android_dlopen_ext == nullptr) {
+    __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                        "android_dlopen_ext hook failed; refusing to arm offline bridge");
+    return false;
   }
+  return true;
 }
 
 }  // namespace
@@ -170,8 +172,7 @@ void install_loader_monitors() {
 extern "C" __attribute__((visibility("default"))) int shadowhook_init(int, bool) {
   bool expected = false;
   if (g_initialized.compare_exchange_strong(expected, true)) {
-    install_loader_monitors();
-    g_init_result.store(kOk);
+    g_init_result.store(install_loader_monitors() ? kOk : kHookFailed);
   }
   g_last_error = g_init_result.load();
   return g_last_error;
