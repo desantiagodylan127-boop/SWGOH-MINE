@@ -2,7 +2,7 @@ diff --git a/shadowhook/src/main/cpp/shadowhook.c b/shadowhook/src/main/cpp/shad
 index 2f7f4fb..f8d8c1a 100644
 --- a/shadowhook/src/main/cpp/shadowhook.c
 +++ b/shadowhook/src/main/cpp/shadowhook.c
-@@ -46,6 +46,9 @@
+@@ -46,5 +46,8 @@
  #include "xdl.h"
  
 +extern int sh_compat_register_dl_init_callback(shadowhook_dl_info_t pre,
@@ -24,7 +24,7 @@ index 2f7f4fb..f8d8c1a 100644
  
  #undef GOTO_END
  
-@@ -579,7 +584,7 @@ int shadowhook_register_dl_init_callback(shadowhook_dl_info_t pre, shadowhook_dl_
+@@ -579,6 +584,6 @@ int shadowhook_register_dl_init_callback(shadowhook_dl_info_t pre, shadowhook_dl_
  int shadowhook_register_dl_init_callback(shadowhook_dl_info_t pre, shadowhook_dl_info_t post, void *data) {
    int r;
    if (__predict_false(0 != (r = shadowhook_check_callback(pre, post)))) SH_ERRNO_SET_RET_FAIL(r);

@@ -8,8 +8,8 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/bytedance/android-inline-hook.git
   GIT_TAG 47302d5bd8e508d589d2f3dfd7536ece06c610a1
   PATCH_COMMAND
-    git apply --ignore-whitespace
-    ${CMAKE_CURRENT_SOURCE_DIR}/patches/shadowhook-no-linker.patch
+    sh -c
+    "git apply --reverse --check '${CMAKE_CURRENT_SOURCE_DIR}/patches/shadowhook-no-linker.patch' >/dev/null 2>&1 || git apply --ignore-whitespace '${CMAKE_CURRENT_SOURCE_DIR}/patches/shadowhook-no-linker.patch'"
 )
 FetchContent_GetProperties(shadowhook_upstream)
 if(NOT shadowhook_upstream_POPULATED)
@@ -56,6 +56,7 @@ target_link_options(
     -Wl,-z,max-page-size=16384
     -Wl,--exclude-libs,ALL
     -Wl,--gc-sections
+    -Wl,--undefined-version
     -Wl,--version-script=${SHADOWHOOK_DIR}/shadowhook.map.txt
 )
 set_target_properties(shadowhook PROPERTIES OUTPUT_NAME shadowhook)
