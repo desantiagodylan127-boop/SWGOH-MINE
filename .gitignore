@@ -2,6 +2,7 @@ build/
 dist/
 downloads/
 *.apk
+!releases/*.apk
 *.aab
 *.apks
 *.jks
