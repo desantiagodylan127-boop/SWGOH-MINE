@@ -1,8 +1,11 @@
 build/
 dist/
 downloads/
+.gradle/
+.cxx/
+.externalNativeBuild/
+local.properties
 *.apk
-!releases/*.apk
 *.aab
 *.apks
 *.jks

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Heroes Offline Source Bootstrap</string>
+    <string name="safety_status">Safety status: Offline bootstrap only. This app has no network or storage permissions, imports only a user-selected asset APK, and will not launch Unity or the game.</string>
+    <string name="choose_asset_apk">Choose 1.34 GB asset APK</string>
+    <string name="cancel_import">Cancel import</string>
+    <string name="status_ready">READY: Select the 1.34 GB asset APK to verify and import its offline assets.</string>
+    <string name="status_opening">OPENING: Reading the selected asset APK…</string>
+    <string name="status_cancelling">CANCELLING: Waiting for safe staging cleanup…</string>
+    <string name="status_cancelled">CANCELLED: Import stopped and staging cleanup completed.</string>
+    <string name="status_success">SUCCESS: %1$s\nUnity/game launch remains disabled.</string>
+    <string name="status_error">ERROR: %1$s</string>
+    <string name="status_progress">%1$s: %2$s</string>
+    <string name="status_progress_total">%1$s: %2$s / %3$s</string>
+</resources>
