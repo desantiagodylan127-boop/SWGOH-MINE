@@ -524,7 +524,7 @@ public final class AssetImporter {
         FileDescriptor descriptor = null;
         try {
             descriptor = Os.open(directory.getAbsolutePath(),
-                    OsConstants.O_RDONLY | OsConstants.O_DIRECTORY, 0);
+                    OsConstants.O_RDONLY, 0);
             Os.fsync(descriptor);
         } catch (Exception error) {
             throw new IOException("Could not sync directory: " + directory, error);
