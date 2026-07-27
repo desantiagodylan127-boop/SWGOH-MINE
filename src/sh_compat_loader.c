@@ -1,3 +1,4 @@
+#include <dlfcn.h>
 #include <link.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -51,6 +52,15 @@ static void sh_compat_notify(struct dl_phdr_info *info, size_t size) {
 static int sh_compat_find_il2cpp(struct dl_phdr_info *info, size_t size, void *data) {
   (void)data;
   if (!sh_compat_is_il2cpp(info->dlpi_name)) return 0;
+
+  // dl_iterate_phdr can expose an ELF before the loading thread has completed
+  // relocation and constructors. Acquiring a NOLOAD handle on this worker
+  // waits for the linker lock without loading a second copy. Never patch code
+  // until that barrier succeeds.
+  void *handle = dlopen(info->dlpi_name, RTLD_NOW | RTLD_NOLOAD);
+  if (NULL == handle) return 0;
+  dlclose(handle);
+
   sh_compat_notify(info, size);
   return 1;
 }
