@@ -21,12 +21,6 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/offline-core/include>
 )
 target_compile_options(offlinecore PRIVATE -Wall -Wextra -Wpedantic -Werror)
-set_target_properties(
-  offlinecore
-  PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN YES
-)
 
 if(ANDROID)
   target_link_options(offlinecore PRIVATE -Wl,-z,max-page-size=16384)
