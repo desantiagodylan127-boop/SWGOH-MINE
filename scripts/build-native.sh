@@ -9,7 +9,7 @@ if [[ -z "${ndk}" || ! -f "${ndk}/build/cmake/android.toolchain.cmake" ]]; then
   exit 1
 fi
 
-for abi in arm64-v8a; do
+for abi in arm64-v8a armeabi-v7a; do
   build_dir="${repo_root}/build/${abi}"
   cmake \
     -S "${repo_root}" \
@@ -19,13 +19,14 @@ for abi in arm64-v8a; do
     -DANDROID_ABI="${abi}" \
     -DANDROID_PLATFORM=android-24 \
     -DANDROID_STL=c++_static \
+    -DHEROES_OFFLINE_BUILD_TESTS=OFF \
     -DCMAKE_BUILD_TYPE=Release
-  cmake --build "${build_dir}" --target shadowhook
+  cmake --build "${build_dir}" --target offlinecore
 
   mkdir -p "${repo_root}/dist/jni/${abi}"
-  cp "${build_dir}/libshadowhook.so" "${repo_root}/dist/jni/${abi}/libshadowhook.so"
+  cp "${build_dir}/libofflinecore.so" "${repo_root}/dist/jni/${abi}/libofflinecore.so"
   "${ndk}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-    "${repo_root}/dist/jni/${abi}/libshadowhook.so"
+    "${repo_root}/dist/jni/${abi}/libofflinecore.so"
 done
 
-echo "Built compatibility libraries under dist/jni/"
+echo "Built source OfflineCore libraries under dist/jni/"

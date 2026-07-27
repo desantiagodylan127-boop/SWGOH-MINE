@@ -1,62 +1,65 @@
 cmake_minimum_required(VERSION 3.22)
-project(heroes_offline_hook_compat LANGUAGES C ASM)
+project(heroes_offline_core LANGUAGES C CXX)
 
-include(FetchContent)
+option(HEROES_OFFLINE_BUILD_TESTS "Build host contract tests" ON)
+option(HEROES_OFFLINE_SANITIZERS "Enable ASan and UBSan in host tests" OFF)
 
-FetchContent_Declare(
-  shadowhook_upstream
-  GIT_REPOSITORY https://github.com/bytedance/android-inline-hook.git
-  GIT_TAG 47302d5bd8e508d589d2f3dfd7536ece06c610a1
-  PATCH_COMMAND
-    sh -c
-    "git apply --reverse --check '${CMAKE_CURRENT_SOURCE_DIR}/patches/shadowhook-no-linker.patch' >/dev/null 2>&1 || git apply --ignore-whitespace '${CMAKE_CURRENT_SOURCE_DIR}/patches/shadowhook-no-linker.patch'"
+set(OFFLINE_CORE_SOURCES
+  src/offline-core/src/content_pack.cpp
+  src/offline-core/src/core.cpp
+  src/offline-core/src/protobuf.cpp
+  src/offline-core/src/rpc_registry.cpp
+  src/offline-core/src/state.cpp
 )
-FetchContent_GetProperties(shadowhook_upstream)
-if(NOT shadowhook_upstream_POPULATED)
-  FetchContent_Populate(shadowhook_upstream)
+
+add_library(offlinecore SHARED ${OFFLINE_CORE_SOURCES})
+add_library(heroes::offlinecore ALIAS offlinecore)
+target_compile_features(offlinecore PUBLIC cxx_std_20)
+target_include_directories(
+  offlinecore
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/offline-core/include>
+)
+target_compile_options(offlinecore PRIVATE -Wall -Wextra -Wpedantic -Werror)
+set_target_properties(
+  offlinecore
+  PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+
+if(ANDROID)
+  target_link_options(offlinecore PRIVATE -Wl,-z,max-page-size=16384)
 endif()
 
-set(SHADOWHOOK_DIR ${shadowhook_upstream_SOURCE_DIR}/shadowhook/src/main/cpp)
-file(
-  GLOB SHADOWHOOK_SOURCES
-  ${SHADOWHOOK_DIR}/*.c
-  ${SHADOWHOOK_DIR}/arch/arm64/*.c
-  ${SHADOWHOOK_DIR}/arch/arm64/*.S
-  ${SHADOWHOOK_DIR}/common/*.c
-  ${SHADOWHOOK_DIR}/third_party/*/*.c
-)
+if(HEROES_OFFLINE_BUILD_TESTS AND NOT ANDROID)
+  enable_testing()
+  add_executable(
+    offlinecore_tests
+    tests/test_main.cpp
+    tests/content_pack_test.cpp
+    tests/core_test.cpp
+    tests/rpc_registry_test.cpp
+    tests/state_test.cpp
+  )
+  target_compile_features(offlinecore_tests PRIVATE cxx_std_20)
+  target_compile_options(
+    offlinecore_tests
+    PRIVATE -Wall -Wextra -Wpedantic -Werror
+  )
+  target_link_libraries(offlinecore_tests PRIVATE heroes::offlinecore)
 
-add_library(shadowhook SHARED ${SHADOWHOOK_SOURCES} src/sh_compat_loader.c)
-target_compile_features(shadowhook PRIVATE c_std_11)
-target_compile_options(
-  shadowhook
-  PRIVATE
-    -Wall
-    -Wextra
-    -Werror
-    -Os
-    -ffunction-sections
-    -fdata-sections
-)
-target_include_directories(
-  shadowhook
-  PRIVATE
-    ${SHADOWHOOK_DIR}
-    ${SHADOWHOOK_DIR}/include
-    ${SHADOWHOOK_DIR}/arch/arm64
-    ${SHADOWHOOK_DIR}/common
-    ${SHADOWHOOK_DIR}/third_party/xdl
-    ${SHADOWHOOK_DIR}/third_party/bsd
-    ${SHADOWHOOK_DIR}/third_party/lss
-)
-target_link_libraries(shadowhook PRIVATE log)
-target_link_options(
-  shadowhook
-  PRIVATE
-    -Wl,-z,max-page-size=16384
-    -Wl,--exclude-libs,ALL
-    -Wl,--gc-sections
-    -Wl,--undefined-version
-    -Wl,--version-script=${SHADOWHOOK_DIR}/shadowhook.map.txt
-)
-set_target_properties(shadowhook PROPERTIES OUTPUT_NAME shadowhook)
+  if(HEROES_OFFLINE_SANITIZERS)
+    target_compile_options(
+      offlinecore PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(offlinecore PRIVATE -fsanitize=address,undefined)
+    target_compile_options(
+      offlinecore_tests
+      PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(offlinecore_tests PRIVATE -fsanitize=address,undefined)
+  endif()
+
+  add_test(NAME offlinecore_contracts COMMAND offlinecore_tests)
+endif()

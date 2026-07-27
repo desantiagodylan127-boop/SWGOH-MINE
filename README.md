@@ -1,92 +1,56 @@
-# Heroes Offline hook compatibility
+# Heroes Offline
 
-This repository contains the source-only ARM64 compatibility layer used to
-replace ShadowHook in the `HeroesOffline-offline6-universal.apk` bootstrap.
-No Electronic Arts game binaries, assets, signing keys, or APKs are stored in
-the repository.
+Clean, source-owned native core for a private offline Android game profile.
+This repository intentionally contains no Electronic Arts binaries, game
+assets, APKs, signing keys, inline hooks, or executable-address patches.
 
-## Why this exists
+## Implemented
 
-The offline bootstrap's existing `libofflinecore.so` uses these ShadowHook APIs:
+- strict `HOPACK1` parsing with bounds, path, duplicate, overlap, and SHA-256
+  validation;
+- atomic content materialization;
+- versioned local profile persistence and deterministic AI generation;
+- dependency-free protobuf encoding;
+- local authentication, initial profile, metadata, and tutorial battle RPCs;
+- a stable C ABI that never lets C++ exceptions cross into its host; and
+- host contract tests plus ARM64 and ARMv7 Android builds.
 
-- `shadowhook_init`
-- `shadowhook_register_dl_init_callback`
-- `shadowhook_hook_func_addr`
-- `shadowhook_dlopen` / `shadowhook_dlsym`
-- `shadowhook_get_errno` / `shadowhook_to_errmsg`
+The source core does **not** yet launch the proprietary Unity client. Runtime
+integration remains gated until it can be done without ShadowHook, Dobby,
+pinned RVAs, or managed-object memory writes.
 
-On the affected Samsung device, stock ShadowHook fails before any game hook is
-installed with `Init linker mod failed`. This build keeps ShadowHook's tested
-function-hook engine but:
+## Host build and tests
 
-- skips ShadowHook's incompatible linker-monitor and queued-symbol modules;
-- avoids modifying both linker internals and public `libdl` trampolines;
-- detects `libil2cpp.so` with `dl_iterate_phdr` from a lightweight worker; and
-- waits for IL2CPP relocation to complete before installing hooks;
-- only intercepts HTTP callbacks whose delegate target matches an observed
-  `RPC<T>` object, falling back for unrelated startup requests; and
-- reports failure to `libofflinecore.so` if any target hook cannot be installed.
+```bash
+cmake -S . -B build/host -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DHEROES_OFFLINE_SANITIZERS=ON
+cmake --build build/host
+ctest --test-dir build/host --output-on-failure
+```
 
-The original offline core remains responsible for its pinned RVAs, request
-handling, local state, and fail-closed behavior.
+## Android native build
 
-## Build
-
-Requirements:
-
-- CMake 3.22+
-- Ninja
-- Android NDK r29 (`29.0.14206865`) or newer
-- Git access for the pinned ShadowHook source
+Requires Android NDK r29 (`29.0.14206865`) or newer:
 
 ```bash
 export ANDROID_NDK_HOME=/path/to/android-ndk-r29
 ./scripts/build-native.sh
 ```
 
-This produces:
+Outputs:
 
 ```text
-dist/jni/arm64-v8a/libshadowhook.so
+dist/jni/arm64-v8a/libofflinecore.so
+dist/jni/armeabi-v7a/libofflinecore.so
 ```
 
-Create the guarded OfflineCore from the exact `offline6` ARM64 library:
+These libraries contain only the stable source C API. They do not depend on or
+modify Android’s linker, Unity, or IL2CPP.
 
-```bash
-./scripts/patch-offlinecore-arm64.py \
-  /path/to/original/libofflinecore.so \
-  dist/jni/arm64-v8a/libofflinecore.so
-```
+## Safety status
 
-ShadowHook is pinned to commit
-`47302d5bd8e508d589d2f3dfd7536ece06c610a1` (version 2.0.1 source).
-
-The APK's original ARMv7 ShadowHook library is deliberately retained because
-the reported linker failure is in the ARM64 process selected by the target
-Samsung phone.
-
-## Patch a locally supplied offline6 APK
-
-```bash
-./scripts/patch-apk.py \
-  /path/to/HeroesOffline-offline6-universal.apk \
-  build/HeroesOffline-offline6-dobby-unsigned-unaligned.apk
-
-zipalign -P 16 -f 4 \
-  build/HeroesOffline-offline6-dobby-unsigned-unaligned.apk \
-  build/HeroesOffline-offline6-dobby-unsigned.apk
-
-apksigner sign --ks /path/to/heroes-offline.jks \
-  --out build/HeroesOffline-offline6-dobby-universal.apk \
-  build/HeroesOffline-offline6-dobby-unsigned.apk
-
-apksigner verify --verbose --print-certs \
-  build/HeroesOffline-offline6-dobby-universal.apk
-```
-
-Use the same signing key as `offline6` to install as an update. If that private
-key is unavailable, uninstall `offline6` before installing a build signed with
-a new key.
-
-The 172 MB `offline6` APK is intentionally asset-light. Keep the existing
-1.34 GB asset APK on the phone and select it from the bootstrap import screen.
+No installable APK is published. Previous experimental binary-patched builds
+were removed after repeated native crashes. A phone build will not be
+published until the source core, content importer, Android bootstrap, and
+hook-free runtime probe all pass their respective test gates.

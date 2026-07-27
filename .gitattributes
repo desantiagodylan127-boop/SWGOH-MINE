@@ -1,2 +1,0 @@
-releases/*.apk filter=lfs diff=lfs merge=lfs -text
-releases/*.zip filter=lfs diff=lfs merge=lfs -text
