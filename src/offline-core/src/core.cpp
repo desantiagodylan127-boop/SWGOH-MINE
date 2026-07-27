@@ -278,6 +278,29 @@ extern "C" ho_status ho_find_content(const char* relative_path,
   }
 }
 
+extern "C" ho_status ho_reload_content(const char* pack_path) {
+  try {
+    if (pack_path == nullptr || pack_path[0] == '\0') {
+      return fail(HO_STATUS_INVALID_ARGUMENT, "pack_path is required");
+    }
+    ContentPack replacement(pack_path);
+    const std::lock_guard lock(runtime_mutex);
+    if (!runtime) {
+      return fail(HO_STATUS_NOT_INITIALIZED,
+                  "offline core is not initialized");
+    }
+    runtime->pack = std::move(replacement);
+    clear_error();
+    return HO_STATUS_OK;
+  } catch (const std::invalid_argument& exception) {
+    return fail(HO_STATUS_INVALID_ARGUMENT, exception.what());
+  } catch (const std::exception& exception) {
+    return fail(HO_STATUS_INTERNAL_ERROR, exception.what());
+  } catch (...) {
+    return fail(HO_STATUS_INTERNAL_ERROR, "unknown content reload error");
+  }
+}
+
 extern "C" void ho_free(void* allocation) { std::free(allocation); }
 
 extern "C" const char* ho_last_error(void) { return last_error.data(); }

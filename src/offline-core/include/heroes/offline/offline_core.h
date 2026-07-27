@@ -55,6 +55,7 @@ HO_API ho_status ho_dispatch_rpc(const char* service, const char* method,
  * successful subsequent initialization. */
 HO_API ho_status ho_find_content(const char* relative_path,
                                  ho_content_location* location);
+HO_API ho_status ho_reload_content(const char* pack_path);
 
 HO_API void ho_free(void* allocation);
 

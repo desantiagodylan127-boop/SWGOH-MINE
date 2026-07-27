@@ -56,4 +56,30 @@ if(HEROES_OFFLINE_BUILD_TESTS AND NOT ANDROID)
   endif()
 
   add_test(NAME offlinecore_contracts COMMAND offlinecore_tests)
+
+  add_executable(
+    il2cpp_bridge_tests
+    src/legacy-bridge/src/il2cpp_bridge.cpp
+    src/legacy-bridge/tests/il2cpp_bridge_test.cpp
+  )
+  target_compile_features(il2cpp_bridge_tests PRIVATE cxx_std_20)
+  target_compile_options(
+    il2cpp_bridge_tests
+    PRIVATE -Wall -Wextra -Wpedantic -Werror
+  )
+  target_include_directories(
+    il2cpp_bridge_tests
+    PRIVATE src/legacy-bridge/include
+  )
+  target_link_libraries(il2cpp_bridge_tests PRIVATE heroes::offlinecore ${CMAKE_DL_LIBS})
+  if(HEROES_OFFLINE_SANITIZERS)
+    target_compile_options(
+      il2cpp_bridge_tests
+      PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer
+    )
+    target_link_options(
+      il2cpp_bridge_tests PRIVATE -fsanitize=address,undefined
+    )
+  endif()
+  add_test(NAME il2cpp_bridge_contracts COMMAND il2cpp_bridge_tests)
 endif()
