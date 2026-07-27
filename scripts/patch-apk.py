@@ -12,6 +12,7 @@ import zipfile
 
 REPLACEMENTS = {
     "lib/arm64-v8a/libshadowhook.so": "arm64-v8a",
+    "lib/arm64-v8a/libofflinecore.so": "arm64-v8a",
 }
 
 
@@ -24,7 +25,7 @@ def is_old_signature(name: str) -> bool:
 
 def patch_apk(source: pathlib.Path, native_dir: pathlib.Path, output: pathlib.Path) -> None:
     replacements = {
-        apk_path: native_dir / abi / "libshadowhook.so"
+        apk_path: native_dir / abi / pathlib.PurePosixPath(apk_path).name
         for apk_path, abi in REPLACEMENTS.items()
     }
     missing = [str(path) for path in replacements.values() if not path.is_file()]

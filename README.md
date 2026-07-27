@@ -22,6 +22,9 @@ function-hook engine but:
 - skips ShadowHook's incompatible linker-monitor and queued-symbol modules;
 - avoids modifying both linker internals and public `libdl` trampolines;
 - detects `libil2cpp.so` with `dl_iterate_phdr` from a lightweight worker; and
+- waits for IL2CPP relocation to complete before installing hooks;
+- only intercepts HTTP callbacks whose delegate target matches an observed
+  `RPC<T>` object, falling back for unrelated startup requests; and
 - reports failure to `libofflinecore.so` if any target hook cannot be installed.
 
 The original offline core remains responsible for its pinned RVAs, request
@@ -45,6 +48,14 @@ This produces:
 
 ```text
 dist/jni/arm64-v8a/libshadowhook.so
+```
+
+Create the guarded OfflineCore from the exact `offline6` ARM64 library:
+
+```bash
+./scripts/patch-offlinecore-arm64.py \
+  /path/to/original/libofflinecore.so \
+  dist/jni/arm64-v8a/libofflinecore.so
 ```
 
 ShadowHook is pinned to commit
