@@ -16,7 +16,10 @@
 #include <string_view>
 #include <utility>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wvariadic-macros"
 #include "dobby.h"
+#pragma clang diagnostic pop
 #include "heroes/offline/il2cpp_bridge.h"
 #include "heroes/offline/offline_core.h"
 
