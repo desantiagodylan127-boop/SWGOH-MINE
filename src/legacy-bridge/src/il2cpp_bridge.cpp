@@ -10,6 +10,7 @@
 #include <mutex>
 #include <system_error>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -125,74 +126,122 @@ class RuntimeClassInspector final : public ClassInspector {
   }
 };
 
-using HttpSend = void (*)(void*, void*);
-using AssetBundleOne = void* (*)(void*, void*);
-using AssetBundleTwo = void* (*)(void*, std::uint32_t, void*);
-
-HttpSend original_http_send = nullptr;
-AssetBundleOne original_asset_bundle_one = nullptr;
-AssetBundleTwo original_asset_bundle_two = nullptr;
+HttpRequestSend original_http_send = nullptr;
+AssetBundleVersionLoad original_asset_bundle_one = nullptr;
+AssetBundleHashLoad original_asset_bundle_two = nullptr;
 
 Configuration snapshot_configuration() {
   const std::lock_guard lock(configuration_mutex);
   return configuration;
 }
 
-void call_original_http(void* request, void* method) noexcept {
+void* call_original_http(void* request, const void* method) noexcept {
   try {
-    if (original_http_send != nullptr) {
-      original_http_send(request, method);
-    }
+    return original_http_send != nullptr ? original_http_send(request, method)
+                                         : nullptr;
   } catch (...) {
+    return nullptr;
   }
 }
 
-void* call_original_asset_one(void* path, void* method) noexcept {
+void* call_original_asset_one(Il2CppString* path,
+                              const std::uint32_t version,
+                              const std::uint32_t crc,
+                              const void* method) noexcept {
   try {
     return original_asset_bundle_one != nullptr
-               ? original_asset_bundle_one(path, method)
+               ? original_asset_bundle_one(path, version, crc, method)
                : nullptr;
   } catch (...) {
     return nullptr;
   }
 }
 
-void* call_original_asset_two(void* path, const std::uint32_t crc,
-                              void* method) noexcept {
+void* call_original_asset_two(Il2CppString* path, const Hash128 hash,
+                              const std::uint32_t crc,
+                              const void* method) noexcept {
   try {
     return original_asset_bundle_two != nullptr
-               ? original_asset_bundle_two(path, crc, method)
+               ? original_asset_bundle_two(path, hash, crc, method)
                : nullptr;
   } catch (...) {
     return nullptr;
   }
 }
 
-bool valid_managed_object(void* object) noexcept {
+// object_get_class cannot make an arbitrary native pointer safe: a bad pointer
+// can raise SIGSEGV, which C++ catch cannot handle. Callers use this only for
+// the managed hook argument or managed references read from an object whose
+// class chain has already been validated.
+void* managed_reference_class(void* object) noexcept {
   if (object == nullptr || api.object_get_class == nullptr) {
-    return false;
+    return nullptr;
   }
   try {
-    return api.object_get_class(object) != nullptr;
+    return api.object_get_class(object);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+bool valid_class_chain(const void* initial_class,
+                       const RuntimeClassInspector& inspector) noexcept {
+  try {
+    const void* current = initial_class;
+    for (std::size_t depth = 0; current != nullptr && depth < 64; ++depth) {
+      ClassDescription description;
+      if (!inspector.describe(current, description) ||
+          description.name.empty()) {
+        return false;
+      }
+      if (description.parent == current) {
+        return false;
+      }
+      current = description.parent;
+    }
+    return current == nullptr;
   } catch (...) {
     return false;
   }
 }
 
-bool managed_object_has_class(void* object, const std::string_view name_space,
-                              const std::string_view name) noexcept {
+bool class_chain_contains(const void* initial_class,
+                          const RuntimeClassInspector& inspector,
+                          const std::string_view name_space,
+                          const std::string_view name) noexcept {
   try {
-    if (!valid_managed_object(object)) {
-      return false;
+    const void* current = initial_class;
+    for (std::size_t depth = 0; current != nullptr && depth < 64; ++depth) {
+      ClassDescription description;
+      if (!inspector.describe(current, description) ||
+          description.name.empty()) {
+        return false;
+      }
+      if (description.name == name && description.name_space == name_space) {
+        return true;
+      }
+      if (description.parent == current) {
+        return false;
+      }
+      current = description.parent;
     }
-    void* klass = api.object_get_class(object);
-    const char* actual_name = api.class_get_name(klass);
-    const char* actual_namespace = api.class_get_namespace(klass);
-    return actual_name != nullptr && actual_namespace != nullptr &&
-           name == actual_name && name_space == actual_namespace;
+    return false;
   } catch (...) {
     return false;
   }
+}
+
+bool managed_reference_has_class(void* object,
+                                 const std::string_view name_space,
+                                 const std::string_view name) noexcept {
+  RuntimeClassInspector inspector;
+  void* klass = managed_reference_class(object);
+  if (!valid_class_chain(klass, inspector)) {
+    return false;
+  }
+  ClassDescription description;
+  return inspector.describe(klass, description) &&
+         description.name == name && description.name_space == name_space;
 }
 
 void set_managed_reference(void* owner, const std::size_t offset,
@@ -202,55 +251,54 @@ void set_managed_reference(void* owner, const std::size_t offset,
   api.gc_wbarrier_set_field(owner, location, value);
 }
 
-[[maybe_unused]] void http_send_proxy(void* request, void* method) noexcept {
+[[maybe_unused]] void* http_send_proxy(void* request,
+                                       const void* method) {
+  bool committed = false;
   try {
-    if (!valid_managed_object(request)) {
-      call_original_http(request, method);
-      return;
+    RuntimeClassInspector inspector;
+    void* request_class = managed_reference_class(request);
+    if (!valid_class_chain(request_class, inspector) ||
+        !class_chain_contains(request_class, inspector, "BestHTTP",
+                              "HTTPRequest")) {
+      return call_original_http(request, method);
     }
 
     void* delegate = read_field<void*>(request, kCallbackOffset);
-    if (!valid_managed_object(delegate)) {
-      call_original_http(request, method);
-      return;
+    void* delegate_class = managed_reference_class(delegate);
+    if (!valid_class_chain(delegate_class, inspector)) {
+      return call_original_http(request, method);
     }
     void* target = read_field<void*>(delegate, kDelegateTargetOffset);
-    if (!valid_managed_object(target)) {
-      call_original_http(request, method);
-      return;
+    void* target_class = managed_reference_class(target);
+    if (!valid_class_chain(target_class, inspector)) {
+      return call_original_http(request, method);
     }
 
-    RuntimeClassInspector inspector;
-    if (!is_rpc_callback_target(api.object_get_class(target), inspector)) {
-      call_original_http(request, method);
-      return;
+    if (!is_rpc_callback_target(target_class, inspector)) {
+      return call_original_http(request, method);
     }
 
-    void* service_string = read_field<void*>(request, kServiceOffset);
-    void* method_string = read_field<void*>(request, kMethodOffset);
-    if (!managed_object_has_class(service_string, "System", "String") ||
-        !managed_object_has_class(method_string, "System", "String")) {
-      call_original_http(request, method);
-      return;
+    void* service_string = read_field<void*>(target, kServiceOffset);
+    void* method_string = read_field<void*>(target, kMethodOffset);
+    if (!managed_reference_has_class(service_string, "System", "String") ||
+        !managed_reference_has_class(method_string, "System", "String")) {
+      return call_original_http(request, method);
     }
     const auto service = il2cpp_string_to_utf8(service_string);
     const auto rpc_method = il2cpp_string_to_utf8(method_string);
     if (!service || service->empty() || !rpc_method || rpc_method->empty()) {
-      call_original_http(request, method);
-      return;
+      return call_original_http(request, method);
     }
 
-    void* payload_object = read_field<void*>(request, kPayloadOffset);
+    void* payload_object = read_field<void*>(target, kPayloadOffset);
     ByteArrayView payload{nullptr, 0};
     if (payload_object != nullptr) {
-      if (!managed_object_has_class(payload_object, "System", "Byte[]")) {
-        call_original_http(request, method);
-        return;
+      if (!managed_reference_has_class(payload_object, "System", "Byte[]")) {
+        return call_original_http(request, method);
       }
       const auto payload_view = il2cpp_byte_array_view(payload_object);
       if (!payload_view) {
-        call_original_http(request, method);
-        return;
+        return call_original_http(request, method);
       }
       payload = *payload_view;
     }
@@ -270,29 +318,25 @@ void set_managed_reference(void* owner, const std::size_t offset,
     if (dispatch_status != HO_STATUS_OK ||
         native_response.size > kMaximumPayloadSize ||
         (native_response.data == nullptr && native_response.size != 0)) {
-      call_original_http(request, method);
-      return;
+      return call_original_http(request, method);
     }
 
     const Configuration current = snapshot_configuration();
     if (current.callbacks.managed_class_resolver == nullptr ||
         current.callbacks.request_delegate_invoker == nullptr) {
-      call_original_http(request, method);
-      return;
+      return call_original_http(request, method);
     }
     void* byte_class = current.callbacks.managed_class_resolver(
         "System", "Byte", current.callbacks.user_data);
     void* response_class = current.callbacks.managed_class_resolver(
         "BestHTTP", "HTTPResponse", current.callbacks.user_data);
     if (byte_class == nullptr || response_class == nullptr) {
-      call_original_http(request, method);
-      return;
+      return call_original_http(request, method);
     }
 
     void* managed_payload = api.array_new(byte_class, native_response.size);
-    if (!valid_managed_object(managed_payload)) {
-      call_original_http(request, method);
-      return;
+    if (managed_payload == nullptr) {
+      return call_original_http(request, method);
     }
     if (native_response.size != 0) {
       std::memcpy(static_cast<std::byte*>(managed_payload) + kArrayDataOffset,
@@ -300,87 +344,92 @@ void set_managed_reference(void* owner, const std::size_t offset,
     }
 
     void* response = api.object_new(response_class);
-    if (!valid_managed_object(response)) {
-      call_original_http(request, method);
-      return;
+    if (response == nullptr) {
+      return call_original_http(request, method);
     }
     api.runtime_object_init(response);
-    if (!valid_managed_object(response)) {
-      call_original_http(request, method);
-      return;
-    }
 
     write_field(response, kResponseStatusOffset, kHttpOk);
     set_managed_reference(response, kResponseDataOffset, managed_payload);
+    committed = true;
     set_managed_reference(request, kRequestResponseOffset, response);
     write_field(request, kRequestStateOffset, kRequestFinished);
 
-    if (!current.callbacks.request_delegate_invoker(
-            delegate, target, request, current.callbacks.user_data)) {
-      // The request is already completed. Calling the network original here
-      // would duplicate the request after mutating its managed state.
-      return;
-    }
+    (void)invoke_request_delegate(current.callbacks, delegate, target, request,
+                                  response);
+    return request;
   } catch (...) {
-    call_original_http(request, method);
+    return committed ? request : call_original_http(request, method);
   }
 }
 
-[[maybe_unused]] void* asset_bundle_one_proxy(void* path,
-                                               void* method) noexcept {
+static_assert(
+    std::is_same_v<decltype(&http_send_proxy), HttpRequestSend>);
+
+[[maybe_unused]] void* asset_bundle_one_proxy(
+    Il2CppString* path, const std::uint32_t version,
+    const std::uint32_t crc, const void* method) {
   try {
     if (original_asset_bundle_one == nullptr) {
       return nullptr;
     }
-    if (!managed_object_has_class(path, "System", "String")) {
-      return call_original_asset_one(path, method);
+    if (!managed_reference_has_class(path, "System", "String")) {
+      return call_original_asset_one(path, version, crc, method);
     }
     const auto url = il2cpp_string_to_utf8(path);
     if (!url) {
-      return call_original_asset_one(path, method);
+      return call_original_asset_one(path, version, crc, method);
     }
     const Configuration current = snapshot_configuration();
     const std::string rewritten =
         rewrite_bundle_url(*url, current.directories.bundle_directory);
     if (rewritten == *url) {
-      return call_original_asset_one(path, method);
+      return call_original_asset_one(path, version, crc, method);
     }
-    void* managed_path = api.string_new(rewritten.c_str());
+    auto* managed_path =
+        static_cast<Il2CppString*>(api.string_new(rewritten.c_str()));
     return managed_path != nullptr
-               ? call_original_asset_one(managed_path, method)
-               : call_original_asset_one(path, method);
+               ? call_original_asset_one(managed_path, version, crc, method)
+               : call_original_asset_one(path, version, crc, method);
   } catch (...) {
-    return call_original_asset_one(path, method);
+    return call_original_asset_one(path, version, crc, method);
   }
 }
 
 [[maybe_unused]] void* asset_bundle_two_proxy(
-    void* path, const std::uint32_t crc, void* method) noexcept {
+    Il2CppString* path, const Hash128 hash, const std::uint32_t crc,
+    const void* method) {
   try {
     if (original_asset_bundle_two == nullptr) {
       return nullptr;
     }
-    if (!managed_object_has_class(path, "System", "String")) {
-      return call_original_asset_two(path, crc, method);
+    if (!managed_reference_has_class(path, "System", "String")) {
+      return call_original_asset_two(path, hash, crc, method);
     }
     const auto url = il2cpp_string_to_utf8(path);
     if (!url) {
-      return call_original_asset_two(path, crc, method);
+      return call_original_asset_two(path, hash, crc, method);
     }
     const Configuration current = snapshot_configuration();
     const std::string rewritten =
         rewrite_bundle_url(*url, current.directories.bundle_directory);
     if (rewritten == *url) {
-      return call_original_asset_two(path, crc, method);
+      return call_original_asset_two(path, hash, crc, method);
     }
-    void* managed_path = api.string_new(rewritten.c_str());
+    auto* managed_path =
+        static_cast<Il2CppString*>(api.string_new(rewritten.c_str()));
     return managed_path != nullptr
-               ? call_original_asset_two(managed_path, crc, method)
-               : call_original_asset_two(path, crc, method);
+               ? call_original_asset_two(managed_path, hash, crc, method)
+               : call_original_asset_two(path, hash, crc, method);
   } catch (...) {
-    return call_original_asset_two(path, crc, method);
+    return call_original_asset_two(path, hash, crc, method);
   }
 }
+
+static_assert(std::is_same_v<decltype(&asset_bundle_one_proxy),
+                             AssetBundleVersionLoad>);
+static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
+                             AssetBundleHashLoad>);
 
 struct ModuleInfo {
   std::uintptr_t base = 0;
@@ -720,6 +769,18 @@ bool install_transaction(const std::span<const HookRequest> hooks,
     }
     return false;
   }
+}
+
+bool invoke_request_delegate(const RuntimeCallbacks& callbacks,
+                             void* delegate_object, void* delegate_target,
+                             void* request_object,
+                             void* response_object) noexcept {
+  if (callbacks.request_delegate_invoker == nullptr) {
+    return false;
+  }
+  return callbacks.request_delegate_invoker(
+      delegate_object, delegate_target, request_object, response_object,
+      callbacks.user_data);
 }
 
 bool configure(CoreDirectories directories,

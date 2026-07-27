@@ -7,9 +7,21 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace bridge = heroes::offline::il2cpp_bridge;
+
+using ExpectedHttpSend = void* (*)(void*, const void*);
+using ExpectedVersionLoad = void* (*)(bridge::Il2CppString*, std::uint32_t,
+                                      std::uint32_t, const void*);
+using ExpectedHashLoad = void* (*)(bridge::Il2CppString*, bridge::Hash128,
+                                   std::uint32_t, const void*);
+static_assert(std::is_same_v<bridge::HttpRequestSend, ExpectedHttpSend>);
+static_assert(
+    std::is_same_v<bridge::AssetBundleVersionLoad, ExpectedVersionLoad>);
+static_assert(std::is_same_v<bridge::AssetBundleHashLoad, ExpectedHashLoad>);
+static_assert(sizeof(bridge::Hash128) == 16);
 
 #define CHECK(condition)       \
   do {                         \
@@ -60,6 +72,20 @@ class FakeInstaller final : public bridge::HookInstaller {
   std::vector<void*> installed;
   std::vector<void*> rolled_back;
 };
+
+struct InvocationCapture {
+  void* delegate = nullptr;
+  void* target = nullptr;
+  void* request = nullptr;
+  void* response = nullptr;
+};
+
+bool capture_invocation(void* delegate, void* target, void* request,
+                        void* response, void* user_data) noexcept {
+  auto& capture = *static_cast<InvocationCapture*>(user_data);
+  capture = {delegate, target, request, response};
+  return true;
+}
 
 int test_utf16_and_array_bounds() {
   constexpr std::array<char16_t, 4> text{u'A', 0xD83D, 0xDE80, u'Z'};
@@ -155,6 +181,21 @@ int test_transaction_rollback() {
   return 0;
 }
 
+int test_delegate_receives_response() {
+  int objects[4]{};
+  InvocationCapture capture;
+  bridge::RuntimeCallbacks callbacks;
+  callbacks.request_delegate_invoker = capture_invocation;
+  callbacks.user_data = &capture;
+  CHECK(bridge::invoke_request_delegate(callbacks, &objects[0], &objects[1],
+                                        &objects[2], &objects[3]));
+  CHECK(capture.delegate == &objects[0]);
+  CHECK(capture.target == &objects[1]);
+  CHECK(capture.request == &objects[2]);
+  CHECK(capture.response == &objects[3]);
+  return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -166,6 +207,7 @@ int main() {
       {"class_gate", test_class_gate},
       {"bundle_rewrite", test_bundle_rewrite},
       {"transaction_rollback", test_transaction_rollback},
+      {"delegate_receives_response", test_delegate_receives_response},
   };
   for (const auto& test : tests) {
     const int line = test.run();

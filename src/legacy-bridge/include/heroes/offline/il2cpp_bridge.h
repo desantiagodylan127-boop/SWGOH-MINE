@@ -99,9 +99,25 @@ struct HookSignatures {
   std::array<std::uint8_t, 8> asset_bundle_two{};
 };
 
+struct Hash128 {
+  std::uint32_t words[4];
+};
+
+struct Il2CppString;
+
+using HttpRequestSend = void* (*)(void* request, const void* method_info);
+using AssetBundleVersionLoad = void* (*)(Il2CppString* path,
+                                         std::uint32_t version,
+                                         std::uint32_t crc,
+                                         const void* method_info);
+using AssetBundleHashLoad = void* (*)(Il2CppString* path, Hash128 hash,
+                                      std::uint32_t crc,
+                                      const void* method_info);
+
 using RequestDelegateInvoker = bool (*)(void* delegate_object,
                                         void* delegate_target,
                                         void* request_object,
+                                        void* response_object,
                                         void* user_data) noexcept;
 using ManagedClassResolver = void* (*)(std::string_view name_space,
                                        std::string_view name,
@@ -117,6 +133,11 @@ struct RuntimeCallbacks {
   void* user_data = nullptr;
   HookSignatures signatures{};
 };
+
+bool invoke_request_delegate(const RuntimeCallbacks& callbacks,
+                             void* delegate_object, void* delegate_target,
+                             void* request_object,
+                             void* response_object) noexcept;
 
 // Configuration is accepted only before the observer is armed.
 bool configure(CoreDirectories directories, RuntimeCallbacks callbacks) noexcept;
