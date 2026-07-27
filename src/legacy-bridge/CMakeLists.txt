@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(legacy_offlinecore_android LANGUAGES C CXX)
+project(legacy_offlinecore_android LANGUAGES C CXX ASM)
 
 if(NOT ANDROID)
   message(FATAL_ERROR "legacy-bridge supports Android only")
