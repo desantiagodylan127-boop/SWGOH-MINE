@@ -50,6 +50,10 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    lint {
+        disable += "ChromeOsAbiSupport"
+    }
 }
 
 dependencies {
