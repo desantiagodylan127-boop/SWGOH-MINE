@@ -14,12 +14,10 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wvariadic-macros"
-#include "dobby.h"
-#pragma clang diagnostic pop
+#include "shadowhook.h"
 #include "heroes/offline/il2cpp_bridge.h"
 #include "heroes/offline/offline_core.h"
 
@@ -70,22 +68,43 @@ void log_error(const char* operation) noexcept {
                       detail != nullptr ? detail : "unknown error");
 }
 
-class DobbyHookInstaller final : public bridge::HookInstaller {
+class ShadowHookInstaller final : public bridge::HookInstaller {
  public:
   bool install(void* target, void* replacement,
                void** original) noexcept override {
-    return target != nullptr && replacement != nullptr && original != nullptr &&
-           DobbyHook(target, replacement, original) == 0;
+    if (target == nullptr || replacement == nullptr || original == nullptr) {
+      return false;
+    }
+    void* stub = shadowhook_hook_func_addr(target, replacement, original);
+    if (stub == nullptr) {
+      return false;
+    }
+    const std::lock_guard lock(mutex_);
+    stubs_[target] = stub;
+    return true;
   }
 
   void rollback(void* target) noexcept override {
-    if (target != nullptr) {
-      (void)DobbyDestroy(target);
+    void* stub = nullptr;
+    {
+      const std::lock_guard lock(mutex_);
+      const auto found = stubs_.find(target);
+      if (found != stubs_.end()) {
+        stub = found->second;
+        stubs_.erase(found);
+      }
+    }
+    if (stub != nullptr) {
+      (void)shadowhook_unhook(stub);
     }
   }
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<void*, void*> stubs_;
 };
 
-DobbyHookInstaller hook_installer;
+ShadowHookInstaller hook_installer;
 
 template <typename Function>
 Function resolve_il2cpp(const char* name) noexcept {
@@ -245,6 +264,13 @@ Java_local_swgoh_heroesoffline2_OfflineBootstrapProvider_nativeInitialize(
     };
     if (ho_initialize(&options) != HO_STATUS_OK) {
       log_error("ho_initialize");
+      return JNI_FALSE;
+    }
+    if (shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false) != 0) {
+      __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                          "shadowhook engine init failed: %s",
+                          shadowhook_to_errmsg(shadowhook_get_init_errno()));
+      (void)ho_shutdown();
       return JNI_FALSE;
     }
 
