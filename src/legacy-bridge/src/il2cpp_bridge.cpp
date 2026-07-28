@@ -129,7 +129,7 @@ class RuntimeClassInspector final : public ClassInspector {
 HttpRequestSend original_http_send = nullptr;
 AssetBundleVersionLoad original_asset_bundle_one = nullptr;
 AssetBundleHashLoad original_asset_bundle_two = nullptr;
-DoGameServiceLogin original_do_game_service_login = nullptr;
+DoGameServiceLoginNative original_do_game_service_login = nullptr;
 IniLoadFromUrl original_ini_load_from_url = nullptr;
 ImportAccountViewReady original_import_account_view_ready = nullptr;
 std::uintptr_t il2cpp_image_base [[maybe_unused]] = 0;
@@ -465,12 +465,11 @@ static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
                                                   Il2CppString* auth_type,
                                                   bool, bool,
                                                   const void* method) {
-  // Force the guest/offline path only. Do not call sibling IL2CPP methods:
-  // those entries require a valid MethodInfo and crashing here is worse than
-  // a hang.
+  // offline12 rearranges registers to the native prologue ABI:
+  // (self, /*force guest*/true, auth_type, /*unused*/false, method).
   try {
     if (original_do_game_service_login != nullptr) {
-      original_do_game_service_login(self, auth_type, true, false, method);
+      original_do_game_service_login(self, true, auth_type, false, method);
     }
   } catch (...) {
   }
@@ -526,8 +525,8 @@ static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
   }
 }
 
-static_assert(
-    std::is_same_v<decltype(&do_game_service_login_proxy), DoGameServiceLogin>);
+static_assert(std::is_same_v<decltype(&do_game_service_login_proxy),
+                             DoGameServiceLoginManaged>);
 static_assert(
     std::is_same_v<decltype(&ini_load_from_url_proxy), IniLoadFromUrl>);
 static_assert(std::is_same_v<decltype(&import_account_view_ready_proxy),
@@ -649,42 +648,29 @@ bool try_install() noexcept {
     const Configuration current = snapshot_configuration();
     if (!matches_signature(module, kHttpSendRva,
                            current.callbacks.signatures.http_send) ||
-        !matches_signature(module, kAssetBundleOneRva,
-                           current.callbacks.signatures.asset_bundle_one) ||
-        !matches_signature(module, kAssetBundleTwoRva,
-                           current.callbacks.signatures.asset_bundle_two) ||
-        !matches_signature(
-            module, kDoGameServiceLoginRva,
-            current.callbacks.signatures.do_game_service_login) ||
         !matches_signature(module, kIniLoadFromUrlRva,
                            current.callbacks.signatures.ini_load_from_url) ||
         !matches_signature(
-            module, kImportAccountViewReadyRva,
-            current.callbacks.signatures.import_account_view_ready)) {
+            module, kDoGameServiceLoginRva,
+            current.callbacks.signatures.do_game_service_login)) {
       dlclose(barrier);
       return false;
     }
 
     il2cpp_image_base = module.base;
-    const std::array<HookRequest, 6> hooks{{
+    // r3 installs only the post-splash transport/login hooks. AssetBundle and
+    // ImportAccount hooks are intentionally omitted until those paths are
+    // crash-free on device.
+    const std::array<HookRequest, 3> hooks{{
         {reinterpret_cast<void*>(module.base + kHttpSendRva),
          reinterpret_cast<void*>(&http_send_proxy),
          reinterpret_cast<void**>(&original_http_send)},
-        {reinterpret_cast<void*>(module.base + kAssetBundleOneRva),
-         reinterpret_cast<void*>(&asset_bundle_one_proxy),
-         reinterpret_cast<void**>(&original_asset_bundle_one)},
-        {reinterpret_cast<void*>(module.base + kAssetBundleTwoRva),
-         reinterpret_cast<void*>(&asset_bundle_two_proxy),
-         reinterpret_cast<void**>(&original_asset_bundle_two)},
-        {reinterpret_cast<void*>(module.base + kDoGameServiceLoginRva),
-         reinterpret_cast<void*>(&do_game_service_login_proxy),
-         reinterpret_cast<void**>(&original_do_game_service_login)},
         {reinterpret_cast<void*>(module.base + kIniLoadFromUrlRva),
          reinterpret_cast<void*>(&ini_load_from_url_proxy),
          reinterpret_cast<void**>(&original_ini_load_from_url)},
-        {reinterpret_cast<void*>(module.base + kImportAccountViewReadyRva),
-         reinterpret_cast<void*>(&import_account_view_ready_proxy),
-         reinterpret_cast<void**>(&original_import_account_view_ready)},
+        {reinterpret_cast<void*>(module.base + kDoGameServiceLoginRva),
+         reinterpret_cast<void*>(&do_game_service_login_proxy),
+         reinterpret_cast<void**>(&original_do_game_service_login)},
     }};
     if (current.callbacks.hook_installer == nullptr ||
         !install_transaction(hooks, *current.callbacks.hook_installer)) {
@@ -952,11 +938,8 @@ bool configure(CoreDirectories directories,
         callbacks.request_delegate_invoker == nullptr ||
         callbacks.managed_class_resolver == nullptr ||
         !signature_is_set(callbacks.signatures.http_send) ||
-        !signature_is_set(callbacks.signatures.asset_bundle_one) ||
-        !signature_is_set(callbacks.signatures.asset_bundle_two) ||
-        !signature_is_set(callbacks.signatures.do_game_service_login) ||
         !signature_is_set(callbacks.signatures.ini_load_from_url) ||
-        !signature_is_set(callbacks.signatures.import_account_view_ready)) {
+        !signature_is_set(callbacks.signatures.do_game_service_login)) {
       return false;
     }
     const std::lock_guard lock(configuration_mutex);

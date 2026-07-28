@@ -133,9 +133,14 @@ using AssetBundleVersionLoad = void* (*)(Il2CppString* path,
 using AssetBundleHashLoad = void* (*)(Il2CppString* path, Hash128 hash,
                                       std::uint32_t crc,
                                       const void* method_info);
-using DoGameServiceLogin = void (*)(void* self, Il2CppString* auth_type,
-                                    bool force_guest, bool unused,
-                                    const void* method_info);
+// Managed entry uses (self, authType, bool, bool, method), but the hooked
+// native prologue expects (self, bool, authType, bool, method).
+using DoGameServiceLoginManaged = void (*)(void* self, Il2CppString* auth_type,
+                                           bool a, bool b,
+                                           const void* method_info);
+using DoGameServiceLoginNative = void (*)(void* self, bool force_guest,
+                                          Il2CppString* auth_type, bool unused,
+                                          const void* method_info);
 using IniLoadFromUrl = void* (*)(void* self, Il2CppString* url,
                                  Il2CppString* section, void* cache,
                                  Il2CppString* fallback,

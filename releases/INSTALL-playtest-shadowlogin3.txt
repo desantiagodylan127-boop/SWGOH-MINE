@@ -1,0 +1,14 @@
+Heroes Offline — shadowlogin3 (crash triage)
+
+Changes vs r2:
+- Fixed DoGameServiceLogin original-call register order (bool before string).
+- Installed ONLY HttpSend + IniLoadFromUrl + DoGameServiceLogin hooks.
+- AssetBundle and ImportAccount hooks are disabled for this build.
+
+Install:
+1. Uninstall existing Heroes Offline.
+2. Install HeroesOffline-playtest-shadowlogin3.apk
+3. Report: crash, black screen, or gets further.
+
+Download:
+https://media.githubusercontent.com/media/desantiagodylan127-boop/SWGOH-MINE/cursor/dobby-hook-shim-528d/releases/HeroesOffline-playtest-shadowlogin3.zip
