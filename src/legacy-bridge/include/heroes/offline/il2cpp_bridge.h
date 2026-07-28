@@ -1,0 +1,199 @@
+#ifndef HEROES_OFFLINE_IL2CPP_BRIDGE_H_
+#define HEROES_OFFLINE_IL2CPP_BRIDGE_H_
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+
+namespace heroes::offline::il2cpp_bridge {
+
+inline constexpr std::size_t kMaximumPayloadSize = 128U * 1024U * 1024U;
+inline constexpr std::uintptr_t kHttpSendRva = 0x030E4CD4U;
+inline constexpr std::uintptr_t kAssetBundleOneRva = 0x054B8228U;
+inline constexpr std::uintptr_t kAssetBundleTwoRva = 0x054B8398U;
+inline constexpr std::uintptr_t kDoGameServiceLoginRva = 0x029F3378U;
+// Sibling helpers used by offline12's guest-login bypass (not mid-prologue
+// offsets). AuthSelected expects (self, forceGuest, authType[, method]).
+inline constexpr std::uintptr_t kDoGameServiceLoginAuthSelectedRva =
+    0x029F36BCU;
+inline constexpr std::uintptr_t kDoGameServiceLoginPostAuthRva = 0x029F37D0U;
+inline constexpr std::uintptr_t kDoGameServiceLoginFinishRva = 0x029F42D4U;
+inline constexpr std::uintptr_t kDoGameServiceLoginContinueRva = 0x029F3F90U;
+inline constexpr std::uintptr_t kIniLoadFromUrlRva = 0x023D7940U;
+inline constexpr std::uintptr_t kImportAccountViewReadyRva = 0x02591D64U;
+inline constexpr std::uintptr_t kImportAccountContinueRva = 0x02591CDCU;
+
+// These helpers reject null input, negative lengths, malformed surrogate pairs,
+// and caller-defined size-limit violations.
+std::optional<std::string> utf16_to_utf8(
+    const char16_t* data, std::ptrdiff_t length,
+    std::size_t maximum_code_units = 1024U * 1024U) noexcept;
+std::optional<std::string> il2cpp_string_to_utf8(
+    const void* string_object,
+    std::size_t maximum_code_units = 1024U * 1024U) noexcept;
+
+struct ByteArrayView {
+  const std::uint8_t* data;
+  std::size_t size;
+};
+
+std::optional<ByteArrayView> il2cpp_byte_array_view(
+    const void* array_object,
+    std::size_t maximum_size = kMaximumPayloadSize) noexcept;
+
+using RegularFilePredicate =
+    std::function<bool(const std::filesystem::path&)>;
+using BundleMaterializer =
+    std::function<std::string(std::string_view basename)>;
+
+// The query and fragment are ignored when selecting the bundle filename.
+// Preference order:
+// 1. A regular file under bundle_directory as file://...
+// 2. Otherwise, when materialize_bundle returns a filesystem path, file://...
+std::string rewrite_bundle_url(std::string_view url,
+                               const std::filesystem::path& bundle_directory,
+                               const RegularFilePredicate& is_regular_file,
+                               const BundleMaterializer& materialize_bundle =
+                                   {}) noexcept;
+std::string rewrite_bundle_url(
+    std::string_view url, const std::filesystem::path& bundle_directory,
+    const BundleMaterializer& materialize_bundle = {}) noexcept;
+
+// Rewrites remote env-list.ini URLs onto a local filesystem copy when present.
+std::string rewrite_ini_url(std::string_view url,
+                            std::string_view local_ini_path) noexcept;
+
+struct ClassDescription {
+  std::string_view name;
+  std::string_view name_space;
+  const void* parent;
+};
+
+class ClassInspector {
+ public:
+  virtual ~ClassInspector() = default;
+  virtual bool describe(const void* klass,
+                        ClassDescription& description) const noexcept = 0;
+};
+
+// Walks at most 64 parents. A matching class must start with "RPC" and have
+// "Rpc" somewhere in its namespace.
+bool is_rpc_callback_target(const void* initial_class,
+                            const ClassInspector& inspector) noexcept;
+
+struct HookRequest {
+  void* target;
+  void* replacement;
+  void** original;
+};
+
+class HookInstaller {
+ public:
+  virtual ~HookInstaller() = default;
+  virtual bool install(void* target, void* replacement,
+                       void** original) noexcept = 0;
+  virtual void rollback(void* target) noexcept = 0;
+};
+
+// Installs in order and rolls back installed hooks in reverse order on error.
+bool install_transaction(std::span<const HookRequest> hooks,
+                         HookInstaller& installer) noexcept;
+
+struct CoreDirectories {
+  std::string storage_directory;
+  std::string cache_directory;
+  std::string pack_path;
+  std::string bundle_directory;
+  std::string apk_path;
+  std::string local_ini_path;
+};
+
+struct HookSignatures {
+  std::array<std::uint8_t, 8> http_send{};
+  std::array<std::uint8_t, 8> asset_bundle_one{};
+  std::array<std::uint8_t, 8> asset_bundle_two{};
+  std::array<std::uint8_t, 8> do_game_service_login{};
+  std::array<std::uint8_t, 8> ini_load_from_url{};
+  std::array<std::uint8_t, 8> import_account_view_ready{};
+};
+
+struct Hash128 {
+  std::uint32_t words[4];
+};
+
+struct Il2CppString;
+
+using HttpRequestSend = void* (*)(void* request, const void* method_info);
+using AssetBundleVersionLoad = void* (*)(Il2CppString* path,
+                                         std::uint32_t version,
+                                         std::uint32_t crc,
+                                         const void* method_info);
+using AssetBundleHashLoad = void* (*)(Il2CppString* path, Hash128 hash,
+                                      std::uint32_t crc,
+                                      const void* method_info);
+// Hooked entry and its trampoline both use the managed IL2CPP ABI:
+// (self, authType, bool, bool, method). The prologue saves x1 as the auth
+// string pointer — never rearrange bool before the string.
+using DoGameServiceLoginManaged = void (*)(void* self, Il2CppString* auth_type,
+                                           bool a, bool b,
+                                           const void* method_info);
+using DoGameServiceLoginAuthSelected = void (*)(void* self, bool force_guest,
+                                                Il2CppString* auth_type,
+                                                const void* method_info);
+using DoGameServiceLoginPostAuth = void (*)(void* self, bool flag,
+                                            void* unused);
+using DoGameServiceLoginFinish = void (*)(void* self, void* unused,
+                                          const void* method_info);
+using IniLoadFromUrl = void* (*)(void* self, Il2CppString* url,
+                                 Il2CppString* section, void* cache,
+                                 Il2CppString* fallback,
+                                 const void* method_info);
+using ImportAccountViewReady = void (*)(void* self, void* unused,
+                                        const void* method_info);
+
+using RequestDelegateInvoker = bool (*)(void* delegate_object,
+                                        void* delegate_target,
+                                        void* request_object,
+                                        void* response_object,
+                                        void* user_data) noexcept;
+using ManagedClassResolver = void* (*)(std::string_view name_space,
+                                       std::string_view name,
+                                       void* user_data) noexcept;
+using ReloadContentCallback = bool (*)(const CoreDirectories& directories,
+                                       void* user_data) noexcept;
+using BundleMaterializeCallback = bool (*)(const char* basename,
+                                           char* output_path,
+                                           std::size_t output_capacity,
+                                           void* user_data) noexcept;
+
+struct RuntimeCallbacks {
+  HookInstaller* hook_installer = nullptr;
+  RequestDelegateInvoker request_delegate_invoker = nullptr;
+  ManagedClassResolver managed_class_resolver = nullptr;
+  ReloadContentCallback reload_content = nullptr;
+  BundleMaterializeCallback materialize_bundle = nullptr;
+  void* user_data = nullptr;
+  HookSignatures signatures{};
+};
+
+bool invoke_request_delegate(const RuntimeCallbacks& callbacks,
+                             void* delegate_object, void* delegate_target,
+                             void* request_object,
+                             void* response_object) noexcept;
+
+// Configuration is accepted only before the observer is armed.
+bool configure(CoreDirectories directories, RuntimeCallbacks callbacks) noexcept;
+bool start_observer() noexcept;
+bool armed() noexcept;
+bool installed() noexcept;
+bool reload_content() noexcept;
+
+}  // namespace heroes::offline::il2cpp_bridge
+
+#endif  // HEROES_OFFLINE_IL2CPP_BRIDGE_H_

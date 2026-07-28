@@ -1,0 +1,20 @@
+Heroes Offline — crash-hardened ShadowHook build (r2)
+
+What was wrong with r1:
+- Post-splash "continue" calls into sibling IL2CPP methods without MethodInfo
+  (hard crash).
+- jar:file:// AssetBundle rewrites are unsafe for this LoadFromFile path.
+
+What r2 does instead:
+- Guest login flag only (no sibling IL2CPP calls).
+- Import-account pass-through only.
+- Lazy-extract UnityBundles from the APK to external files as file:// paths.
+- Local file:// env-list.ini rewrite.
+
+Install:
+1. Uninstall any existing Heroes Offline / local.swgoh.heroesoffline2.
+2. Install HeroesOffline-playtest-shadowlogin2.apk
+3. Launch.
+
+Direct download once pushed:
+https://media.githubusercontent.com/media/desantiagodylan127-boop/SWGOH-MINE/cursor/dobby-hook-shim-528d/releases/HeroesOffline-playtest-shadowlogin2.zip
