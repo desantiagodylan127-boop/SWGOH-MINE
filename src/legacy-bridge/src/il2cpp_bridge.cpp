@@ -129,10 +129,10 @@ class RuntimeClassInspector final : public ClassInspector {
 HttpRequestSend original_http_send = nullptr;
 AssetBundleVersionLoad original_asset_bundle_one = nullptr;
 AssetBundleHashLoad original_asset_bundle_two = nullptr;
-DoGameServiceLoginNative original_do_game_service_login = nullptr;
+DoGameServiceLoginManaged original_do_game_service_login = nullptr;
 IniLoadFromUrl original_ini_load_from_url = nullptr;
 ImportAccountViewReady original_import_account_view_ready = nullptr;
-std::uintptr_t il2cpp_image_base [[maybe_unused]] = 0;
+std::uintptr_t il2cpp_image_base = 0;
 
 Configuration snapshot_configuration() {
   const std::lock_guard lock(configuration_mutex);
@@ -465,12 +465,26 @@ static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
                                                   Il2CppString* auth_type,
                                                   bool, bool,
                                                   const void* method) {
-  // offline12 rearranges registers to the native prologue ABI:
-  // (self, /*force guest*/true, auth_type, /*unused*/false, method).
+  // Match offline12: do not call the hooked trampoline (wrong path / network).
+  // Drive guest login through the AuthSelected sibling with forceGuest=true,
+  // then the post-auth helper and finish entry. MethodInfo for AuthSelected is
+  // intentionally null — that helper never reads it in this build.
   try {
-    if (original_do_game_service_login != nullptr) {
-      original_do_game_service_login(self, true, auth_type, false, method);
+    if (il2cpp_image_base == 0 || self == nullptr) {
+      if (original_do_game_service_login != nullptr) {
+        original_do_game_service_login(self, auth_type, true, false, method);
+      }
+      return;
     }
+    const auto auth_selected = reinterpret_cast<DoGameServiceLoginAuthSelected>(
+        il2cpp_image_base + kDoGameServiceLoginAuthSelectedRva);
+    const auto post_auth = reinterpret_cast<DoGameServiceLoginPostAuth>(
+        il2cpp_image_base + kDoGameServiceLoginPostAuthRva);
+    const auto finish = reinterpret_cast<DoGameServiceLoginFinish>(
+        il2cpp_image_base + kDoGameServiceLoginFinishRva);
+    auth_selected(self, true, auth_type, nullptr);
+    post_auth(self, true, nullptr);
+    finish(self, nullptr, reinterpret_cast<const void*>(finish));
   } catch (...) {
   }
 }

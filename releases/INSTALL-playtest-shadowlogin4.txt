@@ -1,0 +1,17 @@
+Heroes Offline — shadowlogin4 (login ABI fix)
+
+What changed vs shadowlogin3:
+- r3 called DoGameServiceLogin original with bool BEFORE auth string.
+  The IL2CPP prologue expects (self, authType, bool, bool) — that inverted
+  call put "1" in x1 and crashed after the EA splash.
+- r4 matches offline12: intercept login, then call AuthSelected /
+  PostAuth / Finish siblings with forceGuest=true (no trampoline call).
+- Still ShadowHook only (no Dobby). Hooks remain HTTP + INI + login.
+
+Install:
+1. Uninstall local.swgoh.heroesoffline2 if present
+2. Install HeroesOffline-playtest-shadowlogin4.apk
+3. Launch and report: crash / black screen / progress past splash
+
+Download:
+https://media.githubusercontent.com/media/desantiagodylan127-boop/SWGOH-MINE/cursor/dobby-hook-shim-528d/releases/HeroesOffline-playtest-shadowlogin4.zip

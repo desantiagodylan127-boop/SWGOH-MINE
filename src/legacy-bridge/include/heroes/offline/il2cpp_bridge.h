@@ -18,8 +18,12 @@ inline constexpr std::uintptr_t kHttpSendRva = 0x030E4CD4U;
 inline constexpr std::uintptr_t kAssetBundleOneRva = 0x054B8228U;
 inline constexpr std::uintptr_t kAssetBundleTwoRva = 0x054B8398U;
 inline constexpr std::uintptr_t kDoGameServiceLoginRva = 0x029F3378U;
+// Sibling helpers used by offline12's guest-login bypass (not mid-prologue
+// offsets). AuthSelected expects (self, forceGuest, authType[, method]).
 inline constexpr std::uintptr_t kDoGameServiceLoginAuthSelectedRva =
-    0x029F348CU;
+    0x029F36BCU;
+inline constexpr std::uintptr_t kDoGameServiceLoginPostAuthRva = 0x029F37D0U;
+inline constexpr std::uintptr_t kDoGameServiceLoginFinishRva = 0x029F42D4U;
 inline constexpr std::uintptr_t kDoGameServiceLoginContinueRva = 0x029F3F90U;
 inline constexpr std::uintptr_t kIniLoadFromUrlRva = 0x023D7940U;
 inline constexpr std::uintptr_t kImportAccountViewReadyRva = 0x02591D64U;
@@ -133,13 +137,18 @@ using AssetBundleVersionLoad = void* (*)(Il2CppString* path,
 using AssetBundleHashLoad = void* (*)(Il2CppString* path, Hash128 hash,
                                       std::uint32_t crc,
                                       const void* method_info);
-// Managed entry uses (self, authType, bool, bool, method), but the hooked
-// native prologue expects (self, bool, authType, bool, method).
+// Hooked entry and its trampoline both use the managed IL2CPP ABI:
+// (self, authType, bool, bool, method). The prologue saves x1 as the auth
+// string pointer — never rearrange bool before the string.
 using DoGameServiceLoginManaged = void (*)(void* self, Il2CppString* auth_type,
                                            bool a, bool b,
                                            const void* method_info);
-using DoGameServiceLoginNative = void (*)(void* self, bool force_guest,
-                                          Il2CppString* auth_type, bool unused,
+using DoGameServiceLoginAuthSelected = void (*)(void* self, bool force_guest,
+                                                Il2CppString* auth_type,
+                                                const void* method_info);
+using DoGameServiceLoginPostAuth = void (*)(void* self, bool flag,
+                                            void* unused);
+using DoGameServiceLoginFinish = void (*)(void* self, void* unused,
                                           const void* method_info);
 using IniLoadFromUrl = void* (*)(void* self, Il2CppString* url,
                                  Il2CppString* section, void* cache,
