@@ -45,22 +45,25 @@ std::optional<ByteArrayView> il2cpp_byte_array_view(
 
 using RegularFilePredicate =
     std::function<bool(const std::filesystem::path&)>;
+using BundleMaterializer =
+    std::function<std::string(std::string_view basename)>;
 
 // The query and fragment are ignored when selecting the bundle filename.
 // Preference order:
 // 1. A regular file under bundle_directory as file://...
-// 2. Otherwise, when apk_path is set, jar:file://{apk}!/assets/offline/UnityBundles/{basename}
+// 2. Otherwise, when materialize_bundle returns a filesystem path, file://...
 std::string rewrite_bundle_url(std::string_view url,
                                const std::filesystem::path& bundle_directory,
                                const RegularFilePredicate& is_regular_file,
-                               std::string_view apk_path = {}) noexcept;
+                               const BundleMaterializer& materialize_bundle =
+                                   {}) noexcept;
 std::string rewrite_bundle_url(
     std::string_view url, const std::filesystem::path& bundle_directory,
-    std::string_view apk_path = {}) noexcept;
+    const BundleMaterializer& materialize_bundle = {}) noexcept;
 
-// Rewrites remote env-list.ini URLs onto the offline APK asset when present.
+// Rewrites remote env-list.ini URLs onto a local filesystem copy when present.
 std::string rewrite_ini_url(std::string_view url,
-                            std::string_view apk_path) noexcept;
+                            std::string_view local_ini_path) noexcept;
 
 struct ClassDescription {
   std::string_view name;
@@ -104,6 +107,7 @@ struct CoreDirectories {
   std::string pack_path;
   std::string bundle_directory;
   std::string apk_path;
+  std::string local_ini_path;
 };
 
 struct HookSignatures {
@@ -149,12 +153,17 @@ using ManagedClassResolver = void* (*)(std::string_view name_space,
                                        void* user_data) noexcept;
 using ReloadContentCallback = bool (*)(const CoreDirectories& directories,
                                        void* user_data) noexcept;
+using BundleMaterializeCallback = bool (*)(const char* basename,
+                                           char* output_path,
+                                           std::size_t output_capacity,
+                                           void* user_data) noexcept;
 
 struct RuntimeCallbacks {
   HookInstaller* hook_installer = nullptr;
   RequestDelegateInvoker request_delegate_invoker = nullptr;
   ManagedClassResolver managed_class_resolver = nullptr;
   ReloadContentCallback reload_content = nullptr;
+  BundleMaterializeCallback materialize_bundle = nullptr;
   void* user_data = nullptr;
   HookSignatures signatures{};
 };

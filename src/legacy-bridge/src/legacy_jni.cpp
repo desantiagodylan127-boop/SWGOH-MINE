@@ -268,6 +268,68 @@ std::string ensure_pack_path(const std::filesystem::path& storage,
   return {};
 }
 
+std::string ensure_ini_path(const std::filesystem::path& storage,
+                            AAssetManager* assets) {
+  const std::filesystem::path candidate = storage / "env-list.ini";
+  std::error_code file_error;
+  if (std::filesystem::is_regular_file(candidate, file_error) && !file_error) {
+    return candidate.string();
+  }
+  if (extract_asset_file(assets, "offline/env-list.ini", candidate)) {
+    return candidate.string();
+  }
+  return {};
+}
+
+std::mutex asset_mutex;
+AAssetManager* retained_assets = nullptr;
+std::string retained_bundle_directory;
+
+bool materialize_bundle_file(const char* basename, char* output_path,
+                             const std::size_t output_capacity,
+                             void*) noexcept {
+  try {
+    if (basename == nullptr || basename[0] == '\0' || output_path == nullptr ||
+        output_capacity == 0) {
+      return false;
+    }
+    const std::string name(basename);
+    if (name.find('/') != std::string::npos ||
+        name.find('\\') != std::string::npos || name == "." || name == "..") {
+      return false;
+    }
+
+    const std::lock_guard lock(asset_mutex);
+    if (retained_assets == nullptr || retained_bundle_directory.empty()) {
+      return false;
+    }
+    const std::filesystem::path destination =
+        std::filesystem::path(retained_bundle_directory) / name;
+    std::error_code error;
+    if (std::filesystem::is_regular_file(destination, error) && !error) {
+      const std::string text = destination.string();
+      if (text.size() + 1 > output_capacity) {
+        return false;
+      }
+      std::memcpy(output_path, text.c_str(), text.size() + 1);
+      return true;
+    }
+
+    const std::string asset_path = "offline/UnityBundles/" + name;
+    if (!extract_asset_file(retained_assets, asset_path.c_str(), destination)) {
+      return false;
+    }
+    const std::string text = destination.string();
+    if (text.size() + 1 > output_capacity) {
+      return false;
+    }
+    std::memcpy(output_path, text.c_str(), text.size() + 1);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -304,6 +366,15 @@ Java_local_swgoh_heroesoffline2_OfflineBootstrapProvider_nativeInitialize(
     (void)ho_shutdown();
     const std::string pack_path =
         ensure_pack_path(storage.get(), native_assets);
+    const std::string ini_path = ensure_ini_path(storage.get(), native_assets);
+
+    {
+      const std::lock_guard assets_lock(asset_mutex);
+      retained_assets = native_assets;
+      retained_bundle_directory = bundle.get();
+    }
+    std::error_code directory_error;
+    std::filesystem::create_directories(bundle.get(), directory_error);
 
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
@@ -335,12 +406,14 @@ Java_local_swgoh_heroesoffline2_OfflineBootstrapProvider_nativeInitialize(
         .pack_path = pack_path,
         .bundle_directory = bundle.get(),
         .apk_path = apk.get(),
+        .local_ini_path = ini_path,
     };
     bridge::RuntimeCallbacks callbacks;
     callbacks.hook_installer = &hook_installer;
     callbacks.request_delegate_invoker = &invoke_delegate;
     callbacks.managed_class_resolver = &resolve_managed_class;
     callbacks.reload_content = &reload_configured_content;
+    callbacks.materialize_bundle = &materialize_bundle_file;
     callbacks.signatures.http_send =
         std::array<std::uint8_t, 8>{0xfe, 0x57, 0xbe, 0xa9,
                                     0xf4, 0x4f, 0x01, 0xa9};

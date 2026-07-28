@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <type_traits>
@@ -145,22 +146,36 @@ int test_bundle_rewrite() {
             "https://cdn.invalid/v1/missing.bundle?token=old", root,
             only_expected) ==
         "https://cdn.invalid/v1/missing.bundle?token=old");
+  const auto materialize = [](const std::string_view basename) {
+    if (basename == "missing.bundle") {
+      return std::string("/offline/cache/missing.bundle");
+    }
+    return std::string();
+  };
   CHECK(bridge::rewrite_bundle_url(
             "https://cdn.invalid/v1/missing.bundle?token=old", root,
-            only_expected, "/data/app/playtest.apk") ==
-        "jar:file:///data/app/playtest.apk!/assets/offline/UnityBundles/"
-        "missing.bundle");
+            only_expected, materialize) ==
+        "file:///offline/cache/missing.bundle");
   CHECK(bridge::rewrite_bundle_url("https://cdn.invalid/v1/data.json", root,
                                    only_expected) ==
         "https://cdn.invalid/v1/data.json");
-  CHECK(bridge::rewrite_bundle_url("", root, only_expected).empty());
+  const bridge::RegularFilePredicate never = only_expected;
+  CHECK(bridge::rewrite_bundle_url("", root, never).empty());
+
+  const std::filesystem::path ini =
+      std::filesystem::temp_directory_path() / "heroes-offline-env-list.ini";
+  {
+    std::ofstream output(ini, std::ios::trunc);
+    output << "[Environments]\nPROD = https://local/rpc\n";
+    CHECK(output.good());
+  }
   CHECK(bridge::rewrite_ini_url(
-            "https://assetssw.capitalgames.com/env-list.ini",
-            "/data/app/playtest.apk") ==
-        "jar:file:///data/app/playtest.apk!/assets/offline/env-list.ini");
-  CHECK(bridge::rewrite_ini_url("https://example/other.ini",
-                                "/data/app/playtest.apk") ==
+            "https://assetssw.capitalgames.com/env-list.ini", ini.string()) ==
+        std::string("file://") + ini.lexically_normal().generic_string());
+  CHECK(bridge::rewrite_ini_url("https://example/other.ini", ini.string()) ==
         "https://example/other.ini");
+  std::error_code remove_error;
+  std::filesystem::remove(ini, remove_error);
   return 0;
 }
 

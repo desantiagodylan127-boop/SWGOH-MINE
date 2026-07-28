@@ -132,7 +132,7 @@ AssetBundleHashLoad original_asset_bundle_two = nullptr;
 DoGameServiceLogin original_do_game_service_login = nullptr;
 IniLoadFromUrl original_ini_load_from_url = nullptr;
 ImportAccountViewReady original_import_account_view_ready = nullptr;
-std::uintptr_t il2cpp_image_base = 0;
+std::uintptr_t il2cpp_image_base [[maybe_unused]] = 0;
 
 Configuration snapshot_configuration() {
   const std::lock_guard lock(configuration_mutex);
@@ -385,9 +385,21 @@ static_assert(
       return call_original_asset_one(path, version, crc, method);
     }
     const Configuration current = snapshot_configuration();
+    BundleMaterializer materializer;
+    if (current.callbacks.materialize_bundle != nullptr) {
+      materializer = [&current](const std::string_view basename) {
+        std::array<char, 1024> output{};
+        if (!current.callbacks.materialize_bundle(
+                std::string(basename).c_str(), output.data(), output.size(),
+                current.callbacks.user_data) ||
+            output[0] == '\0') {
+          return std::string();
+        }
+        return std::string(output.data());
+      };
+    }
     const std::string rewritten = rewrite_bundle_url(
-        *url, current.directories.bundle_directory,
-        current.directories.apk_path);
+        *url, current.directories.bundle_directory, materializer);
     if (rewritten == *url) {
       return call_original_asset_one(path, version, crc, method);
     }
@@ -416,9 +428,21 @@ static_assert(
       return call_original_asset_two(path, hash, crc, method);
     }
     const Configuration current = snapshot_configuration();
+    BundleMaterializer materializer;
+    if (current.callbacks.materialize_bundle != nullptr) {
+      materializer = [&current](const std::string_view basename) {
+        std::array<char, 1024> output{};
+        if (!current.callbacks.materialize_bundle(
+                std::string(basename).c_str(), output.data(), output.size(),
+                current.callbacks.user_data) ||
+            output[0] == '\0') {
+          return std::string();
+        }
+        return std::string(output.data());
+      };
+    }
     const std::string rewritten = rewrite_bundle_url(
-        *url, current.directories.bundle_directory,
-        current.directories.apk_path);
+        *url, current.directories.bundle_directory, materializer);
     if (rewritten == *url) {
       return call_original_asset_two(path, hash, crc, method);
     }
@@ -441,21 +465,13 @@ static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
                                                   Il2CppString* auth_type,
                                                   bool, bool,
                                                   const void* method) {
+  // Force the guest/offline path only. Do not call sibling IL2CPP methods:
+  // those entries require a valid MethodInfo and crashing here is worse than
+  // a hang.
   try {
     if (original_do_game_service_login != nullptr) {
       original_do_game_service_login(self, auth_type, true, false, method);
     }
-    if (il2cpp_image_base == 0 || self == nullptr) {
-      return;
-    }
-    using AuthSelected = void (*)(void*, bool, void*);
-    using ContinueLogin = void (*)(void*, void*);
-    reinterpret_cast<AuthSelected>(il2cpp_image_base +
-                                   kDoGameServiceLoginAuthSelectedRva)(
-        self, true, nullptr);
-    reinterpret_cast<ContinueLogin>(il2cpp_image_base +
-                                    kDoGameServiceLoginContinueRva)(self,
-                                                                   nullptr);
   } catch (...) {
   }
 }
@@ -480,7 +496,7 @@ static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
     }
     const Configuration current = snapshot_configuration();
     const std::string rewritten =
-        rewrite_ini_url(*text, current.directories.apk_path);
+        rewrite_ini_url(*text, current.directories.local_ini_path);
     if (rewritten == *text) {
       return original_ini_load_from_url(self, url, section, cache, fallback,
                                         method);
@@ -500,16 +516,12 @@ static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
 
 [[maybe_unused]] void import_account_view_ready_proxy(void* self, void* unused,
                                                       const void* method) {
+  // Pass-through only. The offline12 sibling "continue" call is MethodInfo-
+  // sensitive and was crashing on device.
   try {
     if (original_import_account_view_ready != nullptr) {
       original_import_account_view_ready(self, unused, method);
     }
-    if (il2cpp_image_base == 0 || self == nullptr) {
-      return;
-    }
-    using ContinueImport = void (*)(void*, void*);
-    reinterpret_cast<ContinueImport>(il2cpp_image_base +
-                                     kImportAccountContinueRva)(self, nullptr);
   } catch (...) {
   }
 }
@@ -792,7 +804,7 @@ std::string rewrite_bundle_url(
     const std::string_view url,
     const std::filesystem::path& bundle_directory,
     const RegularFilePredicate& is_regular_file,
-    const std::string_view apk_path) noexcept {
+    const BundleMaterializer& materialize_bundle) noexcept {
   try {
     const std::size_t suffix = url.find_first_of("?#");
     const std::string_view without_suffix = url.substr(0, suffix);
@@ -815,12 +827,14 @@ std::string rewrite_bundle_url(
       }
     }
 
-    if (!apk_path.empty()) {
-      std::string rewritten = "jar:file://";
-      rewritten.append(apk_path);
-      rewritten.append("!/assets/offline/UnityBundles/");
-      rewritten.append(basename);
-      return rewritten;
+    if (materialize_bundle) {
+      const std::string materialized = materialize_bundle(basename);
+      if (!materialized.empty()) {
+        return std::string("file://") +
+               std::filesystem::path(materialized)
+                   .lexically_normal()
+                   .generic_string();
+      }
     }
     return std::string(url);
   } catch (...) {
@@ -828,32 +842,36 @@ std::string rewrite_bundle_url(
   }
 }
 
-std::string rewrite_bundle_url(const std::string_view url,
-                               const std::filesystem::path& bundle_directory,
-                               const std::string_view apk_path) noexcept {
+std::string rewrite_bundle_url(
+    const std::string_view url, const std::filesystem::path& bundle_directory,
+    const BundleMaterializer& materialize_bundle) noexcept {
   return rewrite_bundle_url(
       url, bundle_directory,
       [](const std::filesystem::path& path) {
         std::error_code error;
         return std::filesystem::is_regular_file(path, error) && !error;
       },
-      apk_path);
+      materialize_bundle);
 }
 
 std::string rewrite_ini_url(const std::string_view url,
-                            const std::string_view apk_path) noexcept {
+                            const std::string_view local_ini_path) noexcept {
   try {
-    if (apk_path.empty()) {
+    if (local_ini_path.empty()) {
       return std::string(url);
     }
     constexpr std::string_view marker = "env-list.ini";
     if (url.find(marker) == std::string_view::npos) {
       return std::string(url);
     }
-    std::string rewritten = "jar:file://";
-    rewritten.append(apk_path);
-    rewritten.append("!/assets/offline/env-list.ini");
-    return rewritten;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(local_ini_path, error) || error) {
+      return std::string(url);
+    }
+    return std::string("file://") +
+           std::filesystem::path(local_ini_path)
+               .lexically_normal()
+               .generic_string();
   } catch (...) {
     return std::string(url);
   }
