@@ -51,7 +51,7 @@ modify Android’s linker, Unity, or IL2CPP.
 ## Safety status
 
 Experimental phone builds live under `releases/`. Prefer
-`HeroesOffline-playtest-shadowlogin.zip`: it keeps the playtest UnityBundles and
-replaces Dobby with a linker-free ShadowHook engine plus the offline12
-post-splash login/INI/import hooks. Older binary-patched APKs remain withdrawn.
+`HeroesOffline-playtest-shadowlogin4.zip`: it keeps the playtest UnityBundles,
+uses linker-free ShadowHook (no Dobby), and matches offline12’s guest-login
+sibling path after the EA splash. Older binary-patched APKs remain withdrawn.
 
