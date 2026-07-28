@@ -145,10 +145,22 @@ int test_bundle_rewrite() {
             "https://cdn.invalid/v1/missing.bundle?token=old", root,
             only_expected) ==
         "https://cdn.invalid/v1/missing.bundle?token=old");
+  CHECK(bridge::rewrite_bundle_url(
+            "https://cdn.invalid/v1/missing.bundle?token=old", root,
+            only_expected, "/data/app/playtest.apk") ==
+        "jar:file:///data/app/playtest.apk!/assets/offline/UnityBundles/"
+        "missing.bundle");
   CHECK(bridge::rewrite_bundle_url("https://cdn.invalid/v1/data.json", root,
                                    only_expected) ==
         "https://cdn.invalid/v1/data.json");
   CHECK(bridge::rewrite_bundle_url("", root, only_expected).empty());
+  CHECK(bridge::rewrite_ini_url(
+            "https://assetssw.capitalgames.com/env-list.ini",
+            "/data/app/playtest.apk") ==
+        "jar:file:///data/app/playtest.apk!/assets/offline/env-list.ini");
+  CHECK(bridge::rewrite_ini_url("https://example/other.ini",
+                                "/data/app/playtest.apk") ==
+        "https://example/other.ini");
   return 0;
 }
 

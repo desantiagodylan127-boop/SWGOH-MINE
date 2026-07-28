@@ -1,5 +1,6 @@
 #include <jni.h>
 
+#include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
 #include <android/log.h>
 #include <dlfcn.h>
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -213,6 +215,59 @@ bool valid_required_inputs(JNIEnv* env, jstring storage, jstring cache,
          AAssetManager_fromJava(env, asset_manager) != nullptr;
 }
 
+bool extract_asset_file(AAssetManager* assets, const char* asset_path,
+                        const std::filesystem::path& destination) noexcept {
+  try {
+    if (assets == nullptr || asset_path == nullptr || asset_path[0] == '\0') {
+      return false;
+    }
+    AAsset* asset =
+        AAssetManager_open(assets, asset_path, AASSET_MODE_STREAMING);
+    if (asset == nullptr) {
+      return false;
+    }
+    std::error_code error;
+    std::filesystem::create_directories(destination.parent_path(), error);
+    if (error) {
+      AAsset_close(asset);
+      return false;
+    }
+    std::ofstream output(destination, std::ios::binary | std::ios::trunc);
+    if (!output) {
+      AAsset_close(asset);
+      return false;
+    }
+    std::array<char, 1 << 16> buffer{};
+    int read_bytes = 0;
+    while ((read_bytes = AAsset_read(asset, buffer.data(), buffer.size())) >
+           0) {
+      output.write(buffer.data(), read_bytes);
+      if (!output) {
+        AAsset_close(asset);
+        return false;
+      }
+    }
+    AAsset_close(asset);
+    output.close();
+    return read_bytes == 0 && output.good();
+  } catch (...) {
+    return false;
+  }
+}
+
+std::string ensure_pack_path(const std::filesystem::path& storage,
+                             AAssetManager* assets) {
+  const std::filesystem::path candidate = storage / "offline-content.pack";
+  std::error_code file_error;
+  if (std::filesystem::is_regular_file(candidate, file_error) && !file_error) {
+    return candidate.string();
+  }
+  if (extract_asset_file(assets, "offline/offline-content.pack", candidate)) {
+    return candidate.string();
+  }
+  return {};
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -235,20 +290,20 @@ Java_local_swgoh_heroesoffline2_OfflineBootstrapProvider_nativeInitialize(
       return JNI_FALSE;
     }
 
+    AAssetManager* native_assets =
+        AAssetManager_fromJava(env, asset_manager);
+    if (native_assets == nullptr) {
+      return JNI_FALSE;
+    }
+
     const std::lock_guard lock(initialization_mutex);
     if (core_initialized.load(std::memory_order_acquire)) {
       return bridge::armed() ? JNI_TRUE : JNI_FALSE;
     }
 
     (void)ho_shutdown();
-    std::string pack_path;
-    const std::filesystem::path candidate =
-        std::filesystem::path(storage.get()) / "offline-content.pack";
-    std::error_code file_error;
-    if (std::filesystem::is_regular_file(candidate, file_error) &&
-        !file_error) {
-      pack_path = candidate.string();
-    }
+    const std::string pack_path =
+        ensure_pack_path(storage.get(), native_assets);
 
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
@@ -279,6 +334,7 @@ Java_local_swgoh_heroesoffline2_OfflineBootstrapProvider_nativeInitialize(
         .cache_directory = cache.get(),
         .pack_path = pack_path,
         .bundle_directory = bundle.get(),
+        .apk_path = apk.get(),
     };
     bridge::RuntimeCallbacks callbacks;
     callbacks.hook_installer = &hook_installer;
@@ -294,6 +350,15 @@ Java_local_swgoh_heroesoffline2_OfflineBootstrapProvider_nativeInitialize(
     callbacks.signatures.asset_bundle_two =
         std::array<std::uint8_t, 8>{0xfe, 0x0f, 0x1b, 0xf8,
                                     0xfa, 0x67, 0x01, 0xa9};
+    callbacks.signatures.do_game_service_login =
+        std::array<std::uint8_t, 8>{0xfe, 0x67, 0xbc, 0xa9,
+                                    0xf8, 0x5f, 0x01, 0xa9};
+    callbacks.signatures.ini_load_from_url =
+        std::array<std::uint8_t, 8>{0xfe, 0x67, 0xbc, 0xa9,
+                                    0xf8, 0x5f, 0x01, 0xa9};
+    callbacks.signatures.import_account_view_ready =
+        std::array<std::uint8_t, 8>{0xfe, 0x5f, 0xbd, 0xa9,
+                                    0xf6, 0x57, 0x01, 0xa9};
     if (!bridge::configure(std::move(directories), callbacks) ||
         !bridge::start_observer()) {
       (void)ho_shutdown();

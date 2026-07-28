@@ -129,6 +129,10 @@ class RuntimeClassInspector final : public ClassInspector {
 HttpRequestSend original_http_send = nullptr;
 AssetBundleVersionLoad original_asset_bundle_one = nullptr;
 AssetBundleHashLoad original_asset_bundle_two = nullptr;
+DoGameServiceLogin original_do_game_service_login = nullptr;
+IniLoadFromUrl original_ini_load_from_url = nullptr;
+ImportAccountViewReady original_import_account_view_ready = nullptr;
+std::uintptr_t il2cpp_image_base = 0;
 
 Configuration snapshot_configuration() {
   const std::lock_guard lock(configuration_mutex);
@@ -381,8 +385,9 @@ static_assert(
       return call_original_asset_one(path, version, crc, method);
     }
     const Configuration current = snapshot_configuration();
-    const std::string rewritten =
-        rewrite_bundle_url(*url, current.directories.bundle_directory);
+    const std::string rewritten = rewrite_bundle_url(
+        *url, current.directories.bundle_directory,
+        current.directories.apk_path);
     if (rewritten == *url) {
       return call_original_asset_one(path, version, crc, method);
     }
@@ -411,8 +416,9 @@ static_assert(
       return call_original_asset_two(path, hash, crc, method);
     }
     const Configuration current = snapshot_configuration();
-    const std::string rewritten =
-        rewrite_bundle_url(*url, current.directories.bundle_directory);
+    const std::string rewritten = rewrite_bundle_url(
+        *url, current.directories.bundle_directory,
+        current.directories.apk_path);
     if (rewritten == *url) {
       return call_original_asset_two(path, hash, crc, method);
     }
@@ -430,6 +436,90 @@ static_assert(std::is_same_v<decltype(&asset_bundle_one_proxy),
                              AssetBundleVersionLoad>);
 static_assert(std::is_same_v<decltype(&asset_bundle_two_proxy),
                              AssetBundleHashLoad>);
+
+[[maybe_unused]] void do_game_service_login_proxy(void* self,
+                                                  Il2CppString* auth_type,
+                                                  bool, bool,
+                                                  const void* method) {
+  try {
+    if (original_do_game_service_login != nullptr) {
+      original_do_game_service_login(self, auth_type, true, false, method);
+    }
+    if (il2cpp_image_base == 0 || self == nullptr) {
+      return;
+    }
+    using AuthSelected = void (*)(void*, bool, void*);
+    using ContinueLogin = void (*)(void*, void*);
+    reinterpret_cast<AuthSelected>(il2cpp_image_base +
+                                   kDoGameServiceLoginAuthSelectedRva)(
+        self, true, nullptr);
+    reinterpret_cast<ContinueLogin>(il2cpp_image_base +
+                                    kDoGameServiceLoginContinueRva)(self,
+                                                                   nullptr);
+  } catch (...) {
+  }
+}
+
+[[maybe_unused]] void* ini_load_from_url_proxy(void* self, Il2CppString* url,
+                                               Il2CppString* section,
+                                               void* cache,
+                                               Il2CppString* fallback,
+                                               const void* method) {
+  try {
+    if (original_ini_load_from_url == nullptr) {
+      return nullptr;
+    }
+    if (!managed_reference_has_class(url, "System", "String")) {
+      return original_ini_load_from_url(self, url, section, cache, fallback,
+                                        method);
+    }
+    const auto text = il2cpp_string_to_utf8(url);
+    if (!text) {
+      return original_ini_load_from_url(self, url, section, cache, fallback,
+                                        method);
+    }
+    const Configuration current = snapshot_configuration();
+    const std::string rewritten =
+        rewrite_ini_url(*text, current.directories.apk_path);
+    if (rewritten == *text) {
+      return original_ini_load_from_url(self, url, section, cache, fallback,
+                                        method);
+    }
+    auto* managed_url =
+        static_cast<Il2CppString*>(api.string_new(rewritten.c_str()));
+    return original_ini_load_from_url(
+        self, managed_url != nullptr ? managed_url : url, section, cache,
+        fallback, method);
+  } catch (...) {
+    return original_ini_load_from_url != nullptr
+               ? original_ini_load_from_url(self, url, section, cache, fallback,
+                                            method)
+               : nullptr;
+  }
+}
+
+[[maybe_unused]] void import_account_view_ready_proxy(void* self, void* unused,
+                                                      const void* method) {
+  try {
+    if (original_import_account_view_ready != nullptr) {
+      original_import_account_view_ready(self, unused, method);
+    }
+    if (il2cpp_image_base == 0 || self == nullptr) {
+      return;
+    }
+    using ContinueImport = void (*)(void*, void*);
+    reinterpret_cast<ContinueImport>(il2cpp_image_base +
+                                     kImportAccountContinueRva)(self, nullptr);
+  } catch (...) {
+  }
+}
+
+static_assert(
+    std::is_same_v<decltype(&do_game_service_login_proxy), DoGameServiceLogin>);
+static_assert(
+    std::is_same_v<decltype(&ini_load_from_url_proxy), IniLoadFromUrl>);
+static_assert(std::is_same_v<decltype(&import_account_view_ready_proxy),
+                             ImportAccountViewReady>);
 
 struct ModuleInfo {
   std::uintptr_t base = 0;
@@ -550,12 +640,21 @@ bool try_install() noexcept {
         !matches_signature(module, kAssetBundleOneRva,
                            current.callbacks.signatures.asset_bundle_one) ||
         !matches_signature(module, kAssetBundleTwoRva,
-                           current.callbacks.signatures.asset_bundle_two)) {
+                           current.callbacks.signatures.asset_bundle_two) ||
+        !matches_signature(
+            module, kDoGameServiceLoginRva,
+            current.callbacks.signatures.do_game_service_login) ||
+        !matches_signature(module, kIniLoadFromUrlRva,
+                           current.callbacks.signatures.ini_load_from_url) ||
+        !matches_signature(
+            module, kImportAccountViewReadyRva,
+            current.callbacks.signatures.import_account_view_ready)) {
       dlclose(barrier);
       return false;
     }
 
-    const std::array<HookRequest, 3> hooks{{
+    il2cpp_image_base = module.base;
+    const std::array<HookRequest, 6> hooks{{
         {reinterpret_cast<void*>(module.base + kHttpSendRva),
          reinterpret_cast<void*>(&http_send_proxy),
          reinterpret_cast<void**>(&original_http_send)},
@@ -565,12 +664,25 @@ bool try_install() noexcept {
         {reinterpret_cast<void*>(module.base + kAssetBundleTwoRva),
          reinterpret_cast<void*>(&asset_bundle_two_proxy),
          reinterpret_cast<void**>(&original_asset_bundle_two)},
+        {reinterpret_cast<void*>(module.base + kDoGameServiceLoginRva),
+         reinterpret_cast<void*>(&do_game_service_login_proxy),
+         reinterpret_cast<void**>(&original_do_game_service_login)},
+        {reinterpret_cast<void*>(module.base + kIniLoadFromUrlRva),
+         reinterpret_cast<void*>(&ini_load_from_url_proxy),
+         reinterpret_cast<void**>(&original_ini_load_from_url)},
+        {reinterpret_cast<void*>(module.base + kImportAccountViewReadyRva),
+         reinterpret_cast<void*>(&import_account_view_ready_proxy),
+         reinterpret_cast<void**>(&original_import_account_view_ready)},
     }};
     if (current.callbacks.hook_installer == nullptr ||
         !install_transaction(hooks, *current.callbacks.hook_installer)) {
       original_http_send = nullptr;
       original_asset_bundle_one = nullptr;
       original_asset_bundle_two = nullptr;
+      original_do_game_service_login = nullptr;
+      original_ini_load_from_url = nullptr;
+      original_import_account_view_ready = nullptr;
+      il2cpp_image_base = 0;
       dlclose(barrier);
       return false;
     }
@@ -679,11 +791,9 @@ std::optional<ByteArrayView> il2cpp_byte_array_view(
 std::string rewrite_bundle_url(
     const std::string_view url,
     const std::filesystem::path& bundle_directory,
-    const RegularFilePredicate& is_regular_file) noexcept {
+    const RegularFilePredicate& is_regular_file,
+    const std::string_view apk_path) noexcept {
   try {
-    if (!is_regular_file || bundle_directory.empty()) {
-      return std::string(url);
-    }
     const std::size_t suffix = url.find_first_of("?#");
     const std::string_view without_suffix = url.substr(0, suffix);
     const std::size_t slash = without_suffix.find_last_of("/\\");
@@ -695,25 +805,58 @@ std::string rewrite_bundle_url(
         basename == "..") {
       return std::string(url);
     }
-    const std::filesystem::path candidate =
-        bundle_directory / std::string(basename);
-    if (!is_regular_file(candidate)) {
-      return std::string(url);
+
+    if (is_regular_file && !bundle_directory.empty()) {
+      const std::filesystem::path candidate =
+          bundle_directory / std::string(basename);
+      if (is_regular_file(candidate)) {
+        return std::string("file://") +
+               candidate.lexically_normal().generic_string();
+      }
     }
-    return std::string("file://") + candidate.lexically_normal().generic_string();
+
+    if (!apk_path.empty()) {
+      std::string rewritten = "jar:file://";
+      rewritten.append(apk_path);
+      rewritten.append("!/assets/offline/UnityBundles/");
+      rewritten.append(basename);
+      return rewritten;
+    }
+    return std::string(url);
   } catch (...) {
     return std::string(url);
   }
 }
 
-std::string rewrite_bundle_url(
-    const std::string_view url,
-    const std::filesystem::path& bundle_directory) noexcept {
+std::string rewrite_bundle_url(const std::string_view url,
+                               const std::filesystem::path& bundle_directory,
+                               const std::string_view apk_path) noexcept {
   return rewrite_bundle_url(
-      url, bundle_directory, [](const std::filesystem::path& path) {
+      url, bundle_directory,
+      [](const std::filesystem::path& path) {
         std::error_code error;
         return std::filesystem::is_regular_file(path, error) && !error;
-      });
+      },
+      apk_path);
+}
+
+std::string rewrite_ini_url(const std::string_view url,
+                            const std::string_view apk_path) noexcept {
+  try {
+    if (apk_path.empty()) {
+      return std::string(url);
+    }
+    constexpr std::string_view marker = "env-list.ini";
+    if (url.find(marker) == std::string_view::npos) {
+      return std::string(url);
+    }
+    std::string rewritten = "jar:file://";
+    rewritten.append(apk_path);
+    rewritten.append("!/assets/offline/env-list.ini");
+    return rewritten;
+  } catch (...) {
+    return std::string(url);
+  }
 }
 
 bool is_rpc_callback_target(const void* initial_class,
@@ -792,7 +935,10 @@ bool configure(CoreDirectories directories,
         callbacks.managed_class_resolver == nullptr ||
         !signature_is_set(callbacks.signatures.http_send) ||
         !signature_is_set(callbacks.signatures.asset_bundle_one) ||
-        !signature_is_set(callbacks.signatures.asset_bundle_two)) {
+        !signature_is_set(callbacks.signatures.asset_bundle_two) ||
+        !signature_is_set(callbacks.signatures.do_game_service_login) ||
+        !signature_is_set(callbacks.signatures.ini_load_from_url) ||
+        !signature_is_set(callbacks.signatures.import_account_view_ready)) {
       return false;
     }
     const std::lock_guard lock(configuration_mutex);

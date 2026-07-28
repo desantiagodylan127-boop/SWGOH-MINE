@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the source-built ARM64 bridge into the offline6 Android shell."""
+"""Package the source-built ARM64 bridge into an offline Heroes APK shell."""
 
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ import zipfile
 
 
 CORE_PATH = "lib/arm64-v8a/libofflinecore.so"
-OBSOLETE_HOOK_PATH = "lib/arm64-v8a/libshadowhook.so"
+OBSOLETE_HOOK_PATHS = (
+    "lib/arm64-v8a/libshadowhook.so",
+    "lib/armeabi-v7a/libshadowhook.so",
+)
 
 
 def is_signature(name: str) -> bool:
@@ -33,7 +36,6 @@ def package(source: pathlib.Path, core: pathlib.Path, output: pathlib.Path) -> N
         temporary_path = pathlib.Path(temporary.name)
 
     found_core = False
-    found_obsolete_hook = False
     try:
         with zipfile.ZipFile(source, "r") as incoming, zipfile.ZipFile(
             temporary_path, "w", allowZip64=True
@@ -42,8 +44,7 @@ def package(source: pathlib.Path, core: pathlib.Path, output: pathlib.Path) -> N
             for info in incoming.infolist():
                 if is_signature(info.filename):
                     continue
-                if info.filename == OBSOLETE_HOOK_PATH:
-                    found_obsolete_hook = True
+                if info.filename in OBSOLETE_HOOK_PATHS:
                     continue
                 if info.filename == CORE_PATH:
                     found_core = True
@@ -54,8 +55,8 @@ def package(source: pathlib.Path, core: pathlib.Path, output: pathlib.Path) -> N
                     outgoing.writestr(replacement_info, replacement)
                 else:
                     outgoing.writestr(info, incoming.read(info.filename))
-        if not found_core or not found_obsolete_hook:
-            raise ValueError("Input is not the expected offline6 universal APK")
+        if not found_core:
+            raise ValueError(f"Input APK is missing {CORE_PATH}")
         shutil.move(temporary_path, output)
     finally:
         temporary_path.unlink(missing_ok=True)

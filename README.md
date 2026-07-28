@@ -50,7 +50,8 @@ modify Android’s linker, Unity, or IL2CPP.
 
 ## Safety status
 
-No installable APK is published. Previous experimental binary-patched builds
-were removed after repeated native crashes. A phone build will not be
-published until the source core, content importer, Android bootstrap, and
-hook-free runtime probe all pass their respective test gates.
+Experimental phone builds live under `releases/`. Prefer
+`HeroesOffline-playtest-shadowlogin.zip`: it keeps the playtest UnityBundles and
+replaces Dobby with a linker-free ShadowHook engine plus the offline12
+post-splash login/INI/import hooks. Older binary-patched APKs remain withdrawn.
+

@@ -17,6 +17,13 @@ inline constexpr std::size_t kMaximumPayloadSize = 128U * 1024U * 1024U;
 inline constexpr std::uintptr_t kHttpSendRva = 0x030E4CD4U;
 inline constexpr std::uintptr_t kAssetBundleOneRva = 0x054B8228U;
 inline constexpr std::uintptr_t kAssetBundleTwoRva = 0x054B8398U;
+inline constexpr std::uintptr_t kDoGameServiceLoginRva = 0x029F3378U;
+inline constexpr std::uintptr_t kDoGameServiceLoginAuthSelectedRva =
+    0x029F348CU;
+inline constexpr std::uintptr_t kDoGameServiceLoginContinueRva = 0x029F3F90U;
+inline constexpr std::uintptr_t kIniLoadFromUrlRva = 0x023D7940U;
+inline constexpr std::uintptr_t kImportAccountViewReadyRva = 0x02591D64U;
+inline constexpr std::uintptr_t kImportAccountContinueRva = 0x02591CDCU;
 
 // These helpers reject null input, negative lengths, malformed surrogate pairs,
 // and caller-defined size-limit violations.
@@ -40,15 +47,20 @@ using RegularFilePredicate =
     std::function<bool(const std::filesystem::path&)>;
 
 // The query and fragment are ignored when selecting the bundle filename.
-// A rewrite is returned only for a basename ending in ".bundle" that exists
-// as a regular file under bundle_directory.
+// Preference order:
+// 1. A regular file under bundle_directory as file://...
+// 2. Otherwise, when apk_path is set, jar:file://{apk}!/assets/offline/UnityBundles/{basename}
 std::string rewrite_bundle_url(std::string_view url,
                                const std::filesystem::path& bundle_directory,
-                               const RegularFilePredicate& is_regular_file)
-    noexcept;
+                               const RegularFilePredicate& is_regular_file,
+                               std::string_view apk_path = {}) noexcept;
 std::string rewrite_bundle_url(
-    std::string_view url,
-    const std::filesystem::path& bundle_directory) noexcept;
+    std::string_view url, const std::filesystem::path& bundle_directory,
+    std::string_view apk_path = {}) noexcept;
+
+// Rewrites remote env-list.ini URLs onto the offline APK asset when present.
+std::string rewrite_ini_url(std::string_view url,
+                            std::string_view apk_path) noexcept;
 
 struct ClassDescription {
   std::string_view name;
@@ -91,12 +103,16 @@ struct CoreDirectories {
   std::string cache_directory;
   std::string pack_path;
   std::string bundle_directory;
+  std::string apk_path;
 };
 
 struct HookSignatures {
   std::array<std::uint8_t, 8> http_send{};
   std::array<std::uint8_t, 8> asset_bundle_one{};
   std::array<std::uint8_t, 8> asset_bundle_two{};
+  std::array<std::uint8_t, 8> do_game_service_login{};
+  std::array<std::uint8_t, 8> ini_load_from_url{};
+  std::array<std::uint8_t, 8> import_account_view_ready{};
 };
 
 struct Hash128 {
@@ -113,6 +129,15 @@ using AssetBundleVersionLoad = void* (*)(Il2CppString* path,
 using AssetBundleHashLoad = void* (*)(Il2CppString* path, Hash128 hash,
                                       std::uint32_t crc,
                                       const void* method_info);
+using DoGameServiceLogin = void (*)(void* self, Il2CppString* auth_type,
+                                    bool force_guest, bool unused,
+                                    const void* method_info);
+using IniLoadFromUrl = void* (*)(void* self, Il2CppString* url,
+                                 Il2CppString* section, void* cache,
+                                 Il2CppString* fallback,
+                                 const void* method_info);
+using ImportAccountViewReady = void (*)(void* self, void* unused,
+                                        const void* method_info);
 
 using RequestDelegateInvoker = bool (*)(void* delegate_object,
                                         void* delegate_target,

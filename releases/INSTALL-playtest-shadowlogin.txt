@@ -1,0 +1,16 @@
+Heroes Offline — playtest + ShadowHook post-splash fix
+
+Diagnosis of the Drive pair (offline12-final + playtest):
+- Both use a Dobby-backed OfflineCore.
+- After the EA splash, offline12 needs login / env-list / import hooks.
+- Playtest is the APK that actually contains the UnityBundles.
+
+This ZIP is the playtest APK with those hooks rebuilt on a linker-free
+ShadowHook engine (no Dobby).
+
+Phone install:
+1. Uninstall any existing "Heroes Offline" / local.swgoh.heroesoffline2.
+2. Install HeroesOffline-playtest-shadowlogin.apk from this ZIP.
+3. Launch the app.
+
+You do NOT need to also install offline12-final for this test build.
